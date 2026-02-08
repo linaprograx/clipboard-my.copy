@@ -1,6 +1,9 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, screen, clipboard } from 'electron';
 import { exec } from 'child_process';
 import path from 'path';
+import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 import Store from 'electron-store';
 import { v4 as uuidv4 } from 'uuid';
 // Store Setup
@@ -13,24 +16,52 @@ const store = new Store({
 let mainWindow = null;
 let lastClipboardContent = '';
 const createWindow = () => {
-    const { width, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
+    const primaryDisplay = screen.getPrimaryDisplay();
+    // Use 'bounds' for width to span the full physical screen, ignoring Dock/Sidebars
+    const { width } = primaryDisplay.bounds;
+    const { height: workAreaHeight } = primaryDisplay.workAreaSize; // Still use workArea for height to avoid covering top menu bar? 
+    // Actually, for "Bottom Dock" that covers the OS Dock, we might want bounds.height too, 
+    // but usually we just want to sit at the bottom of the visible area.
+    // Let's use bounds.height for calculating 'y' if we want to be TRULY at the bottom.
+    const { height: screenHeight } = primaryDisplay.bounds;
+    const APP_HEIGHT = 280; // Reduced height (Compact Dock)
     mainWindow = new BrowserWindow({
-        width: 800,
-        height: 350,
+        width: width,
+        height: APP_HEIGHT,
+        x: 0,
+        y: screenHeight - APP_HEIGHT, // Sit at the absolute bottom of the screen
         frame: false,
         transparent: true,
+        vibrancy: 'fullscreen-ui', // Darker vibrancy for the "Paste" look
+        visualEffectState: 'active',
         resizable: false,
         alwaysOnTop: true,
         skipTaskbar: true,
-        vibrancy: 'fullscreen-ui', // macOS vibrancy
-        visualEffectState: 'active',
+        hasShadow: false,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             nodeIntegration: false,
             contextIsolation: true,
         },
     });
-    mainWindow.setPosition((width - 800) / 2, screenHeight - 400);
+    // Force exact bounds
+    const setBounds = () => {
+        if (!mainWindow)
+            return;
+        mainWindow.setBounds({
+            x: 0,
+            y: screenHeight - APP_HEIGHT,
+            width: width,
+            height: APP_HEIGHT
+        });
+    };
+    setBounds();
+    // Aggressively ensure bounds on macOS
+    setTimeout(setBounds, 100);
+    setTimeout(setBounds, 500);
+    setTimeout(setBounds, 1000); // Fail-safe explanation: macOS sometimes overrides initial bounds for frameless windows.
+    // Ensure it stays at the bottom even if focus changes (optional, aggressive)
+    // mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     if (process.env.VITE_DEV_SERVER_URL) {
         mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
         // mainWindow.webContents.openDevTools({ mode: 'detach' }); 
@@ -90,13 +121,41 @@ app.whenReady().then(() => {
     if (!ret) {
         console.log('registration failed');
     }
-    // Clipboard polling
-    setInterval(checkClipboard, 1000); // 1 second poll
-    app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) {
-            createWindow();
+});
+// Clipboard polling
+setInterval(() => {
+    try {
+        const text = clipboard.readText();
+        if (text && text !== lastClipboardContent && text.trim().length > 0) {
+            lastClipboardContent = text;
+            const newItem = {
+                id: uuidv4(),
+                type: 'text',
+                content: text,
+                timestamp: Date.now(),
+                pinned: false
+            };
+            // Add to store
+            const history = store.get('history', []);
+            // Avoid dupes at top
+            if (history.length === 0 || history[0].content !== text) {
+                const newHistory = [newItem, ...history].slice(0, 100);
+                store.set('history', newHistory);
+                // Send to Renderer
+                if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('clipboard-changed', newItem);
+                }
+            }
         }
-    });
+    }
+    catch (e) {
+        console.error("Clipboard poll error", e);
+    }
+}, 1000); // 1 second poll
+app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+    }
 });
 // IPC Handlers
 ipcMain.handle('get-history', () => {

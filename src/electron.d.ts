@@ -11,6 +11,7 @@ export interface IElectronAPI {
     hideWithoutPaste: () => void;
     getHistory: () => Promise<ClipboardItem[]>;
     onClipboardUpdate: (callback: (history: ClipboardItem[]) => void) => () => void;
+    onClipboardChanged: (callback: (item: ClipboardItem) => void) => () => void;
     pasteItem: (item: ClipboardItem) => void;
     pinItem: (id: string) => void;
 }
