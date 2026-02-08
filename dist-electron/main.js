@@ -6,25 +6,33 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const electron_1 = require("electron");
 const child_process_1 = require("child_process");
 const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
+const { fileURLToPath } = require('url');
 const electron_store_1 = __importDefault(require("electron-store"));
-const uuid_1 = require("uuid");
+const ClipboardService_1 = require("./services/ClipboardService");
 // Store Setup
 const store = new electron_store_1.default({
     defaults: { history: [] }
 });
-// Handle creating/removing shortcuts on Windows when installing/uninstalling.
+// Startup Cleanup: Remove "Division Palermo" card if exists
+const history = store.get('history', []);
+const sanitizedHistory = history.filter(item => {
+    const content = (item.content || '').toLowerCase();
+    const isDivisionPalermo = content.includes('division palermo') || content.includes('división palermo');
+    return !isDivisionPalermo;
+});
+if (history.length !== sanitizedHistory.length) {
+    store.set('history', sanitizedHistory);
+    console.log('Sanitized history: Removed "Division Palermo" card(s)');
+}
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 // Removed electron-squirrel-startup check to prevent issues on non-Windows platforms/dev.
 let mainWindow = null;
+let clipboardService = null;
 let lastClipboardContent = '';
 const createWindow = () => {
     const primaryDisplay = electron_1.screen.getPrimaryDisplay();
-    // Use 'bounds' for width to span the full physical screen, ignoring Dock/Sidebars
     const { width } = primaryDisplay.bounds;
-    const { height: workAreaHeight } = primaryDisplay.workAreaSize; // Still use workArea for height to avoid covering top menu bar? 
-    // Actually, for "Bottom Dock" that covers the OS Dock, we might want bounds.height too, 
-    // but usually we just want to sit at the bottom of the visible area.
-    // Let's use bounds.height for calculating 'y' if we want to be TRULY at the bottom.
     const { height: screenHeight } = primaryDisplay.bounds;
     const APP_HEIGHT = 280; // Reduced height (Compact Dock)
     mainWindow = new electron_1.BrowserWindow({
@@ -62,30 +70,27 @@ const createWindow = () => {
     // Aggressively ensure bounds on macOS
     setTimeout(setBounds, 100);
     setTimeout(setBounds, 500);
-    setTimeout(setBounds, 1000); // Fail-safe explanation: macOS sometimes overrides initial bounds for frameless windows.
-    // Ensure it stays at the bottom even if focus changes (optional, aggressive)
-    // mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    setTimeout(setBounds, 1000);
     if (process.env.VITE_DEV_SERVER_URL) {
         mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-        mainWindow.webContents.openDevTools({ mode: 'detach' });
     }
     else {
         mainWindow.loadFile(path_1.default.join(__dirname, '../dist/index.html'));
     }
-    // Hide on blur (optional, maybe configurable)
-    // mainWindow.on('blur', () => mainWindow?.hide());
+    // Ensure service has the latest window reference
+    if (clipboardService) {
+        clipboardService.updateMainWindow(mainWindow);
+    }
 };
-// ... (existing code) ...
-// ... (existing code) ...
 // Helper to update store and notify renderer
 const dispatchClipboardUpdate = (newItem) => {
-    console.log("Dispatching update for item:", newItem.id);
+    // ... (logic remains same, shortened for brevity if possible, keeping functionality)
     const history = store.get('history', []);
     // Avoid exact duplicate at the top
     if (history.length > 0) {
         const top = history[0];
         if (top.type === newItem.type && (top.content === newItem.content || top.preview === newItem.preview)) {
-            console.log("Duplicate detected. Backend has it, but UI might not. Forcing sync.");
+            // Duplicate detected. Sync if needed.
             if (mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send('clipboard-updated', history);
             }
@@ -95,82 +100,75 @@ const dispatchClipboardUpdate = (newItem) => {
     const newHistory = [newItem, ...history].slice(0, 100);
     store.set('history', newHistory);
     if (mainWindow && !mainWindow.isDestroyed()) {
-        console.log("Sending 'clipboard-changed' to renderer...");
         mainWindow.webContents.send('clipboard-changed', newItem);
     }
-    else {
-        console.error("MainWindow is missing or destroyed, cannot send IPC.");
-    }
 };
-electron_1.app.whenReady().then(() => {
-    createWindow();
-    // Global Shortcut
-    const ret = electron_1.globalShortcut.register('CommandOrControl+Shift+V', () => {
-        if (mainWindow) {
-            if (mainWindow.isVisible()) {
-                mainWindow.hide();
-            }
-            else {
-                // Send current history before showing
-                mainWindow.webContents.send('clipboard-updated', store.get('history'));
-                mainWindow.show();
-                mainWindow.focus();
-            }
+// Register Privileged Schemes (MUST be done before app is ready)
+electron_1.protocol.registerSchemesAsPrivileged([
+    {
+        scheme: 'thumbnail',
+        privileges: {
+            secure: true,
+            standard: true,
+            supportFetchAPI: true,
+            bypassCSP: true,
+            corsEnabled: true
         }
-    });
-    if (!ret) {
-        console.log('registration failed');
     }
-});
-// Clipboard polling
-// Clipboard polling (500ms for responsiveness)
-setInterval(() => {
-    try {
-        // 1. Check Text
-        const text = electron_1.clipboard.readText();
-        // console.log("Checking clipboard:", text.substring(0, 20)); // Verbose logging
-        if (text && text !== lastClipboardContent && text.trim().length > 0) {
-            console.log("New text detected:", text.substring(0, 20));
-            lastClipboardContent = text;
-            const newItem = {
-                id: (0, uuid_1.v4)(),
-                type: 'text',
-                content: text,
-                timestamp: Date.now(),
-                pinned: false
-            };
-            dispatchClipboardUpdate(newItem);
+]);
+electron_1.app.whenReady().then(() => {
+    // 1. Register 'thumbnail://' protocol
+    electron_1.protocol.registerFileProtocol('thumbnail', (request, callback) => {
+        let url = request.url;
+        console.log('[Protocol] RAW REQUEST:', url);
+        // Remove protocol scheme
+        url = url.replace(/^thumbnail:\/*/i, '');
+        // Remove any trailing slashes
+        url = url.replace(/\/+$/, '');
+        const filename = decodeURIComponent(url);
+        const filePath = path_1.default.join(electron_1.app.getPath('userData'), 'thumbnails', filename);
+        console.log('[Protocol] Cleaned filename:', filename);
+        console.log('[Protocol] Full path:', filePath);
+        console.log('[Protocol] Exists:', fs_1.default.existsSync(filePath));
+        if (!fs_1.default.existsSync(filePath)) {
+            console.error('[Protocol] ERROR: File not found');
+            callback({ error: -6 }); // NET_ERROR(FILE_NOT_FOUND)
+            return;
         }
-        // 2. Check Image (Basic check: if image is diff from last)
-        // Note: Reading images is expensive, so we optimized by checking available formats first
-        const formats = electron_1.clipboard.availableFormats();
-        if (formats.includes('image/png') || formats.includes('image/jpeg')) {
-            const image = electron_1.clipboard.readImage();
-            if (!image.isEmpty()) {
-                const dataUrl = image.toDataURL();
-                // Simple diff: length check or store hash. For now, check if different from last content (if it was an image)
-                // This is a naive check. A better way is to store the last 'sequenceNumber' if Electron supported it, 
-                // or just compare dataUrl length/content if it's not too huge.
-                // Let's rely on strict equality for now, but to avoid loop, we need to store it.
-                if (dataUrl !== lastClipboardContent) {
-                    lastClipboardContent = dataUrl;
-                    const newItem = {
-                        id: (0, uuid_1.v4)(),
-                        type: 'image',
-                        content: 'Image content placeholder', // UI uses this for text preview
-                        preview: dataUrl, // Actual image data
-                        timestamp: Date.now(),
-                        pinned: false
-                    };
-                    dispatchClipboardUpdate(newItem);
+        callback({ path: filePath });
+    });
+    createWindow();
+    // Initialize Clipboard Service
+    console.log('[Main] UserData Path:', electron_1.app.getPath('userData'));
+    console.log('[Main] Initializing ClipboardService...');
+    try {
+        clipboardService = new ClipboardService_1.ClipboardService(store, mainWindow);
+        clipboardService.startMonitoring();
+        console.log('[Main] ClipboardService initialized successfully.');
+    }
+    catch (err) {
+        console.error('[Main] Failed to initialize ClipboardService:', err);
+    }
+    // Global Shortcut
+    try {
+        electron_1.globalShortcut.register('CommandOrControl+Shift+V', () => {
+            if (mainWindow) {
+                if (mainWindow.isVisible()) {
+                    mainWindow.hide();
+                }
+                else {
+                    // Send current history before showing
+                    mainWindow.webContents.send('clipboard-updated', store.get('history'));
+                    mainWindow.show();
+                    mainWindow.focus();
                 }
             }
-        }
+        });
     }
     catch (e) {
-        console.error("Clipboard poll error", e);
+        // Ignore registration errors
     }
-}, 500);
+});
 electron_1.app.on('activate', () => {
     if (electron_1.BrowserWindow.getAllWindows().length === 0) {
         createWindow();
@@ -178,31 +176,78 @@ electron_1.app.on('activate', () => {
 });
 // IPC Handlers
 electron_1.ipcMain.handle('get-history', () => {
-    const history = store.get('history', []);
-    console.log("Renderer requested history. Count:", history.length);
-    return history;
+    return store.get('history', []);
 });
 electron_1.ipcMain.on('hide-window', () => {
     mainWindow?.hide();
 });
-electron_1.ipcMain.on('paste-item', (event, item) => {
+electron_1.ipcMain.on('toggle-pin', (event, id) => {
+    const history = store.get('history');
+    const index = history.findIndex(item => item.id === id);
+    if (index !== -1) {
+        history[index].pinned = !history[index].pinned;
+        store.set('history', history);
+        mainWindow?.webContents.send('clipboard-updated', history);
+    }
+});
+electron_1.ipcMain.on('copy-item', (event, id) => {
+    if (!id || typeof id !== 'string')
+        return;
+    const history = store.get('history');
+    const item = history.find(i => i.id === id);
+    if (!item)
+        return;
+    try {
+        if (item.type === 'image' && item.preview) {
+            const img = electron_1.nativeImage.createFromDataURL(item.preview);
+            if (!img.isEmpty()) {
+                electron_1.clipboard.writeImage(img);
+                lastClipboardContent = item.preview;
+            }
+        }
+        else {
+            electron_1.clipboard.writeText(item.content);
+            lastClipboardContent = item.content;
+        }
+        // Do NOT hide window, just copy
+    }
+    catch (err) {
+        console.error('Failed to copy item:', err);
+    }
+});
+electron_1.ipcMain.on('paste-item', (event, id) => {
+    if (!id || typeof id !== 'string')
+        return;
+    const history = store.get('history');
+    const item = history.find(i => i.id === id);
+    if (!item)
+        return;
     // 1. Write to clipboard
-    electron_1.clipboard.writeText(item.content);
-    lastClipboardContent = item.content; // Avoid re-capture loop
-    // 2. Hide window
-    mainWindow?.hide();
-    // 3. Simulate paste (CMD+V)
-    // Using robotjs is hard to set up (native deps). 
-    // Fallback: Use simple AppleScript via 'osascript' command.
-    // It's standard on macOS.
-    const script = `osascript -e 'tell application "System Events" to keystroke "v" using command down'`;
-    (0, child_process_1.exec)(script);
+    try {
+        if (item.type === 'image' && item.preview) {
+            const img = electron_1.nativeImage.createFromDataURL(item.preview);
+            if (!img.isEmpty()) {
+                electron_1.clipboard.writeImage(img);
+                lastClipboardContent = item.preview;
+            }
+        }
+        else {
+            electron_1.clipboard.writeText(item.content);
+            lastClipboardContent = item.content;
+        }
+        // 2. Hide window
+        mainWindow?.hide();
+        // 3. Simulate paste (CMD+V)
+        const script = `osascript -e 'tell application "System Events" to keystroke "v" using command down'`;
+        (0, child_process_1.exec)(script);
+    }
+    catch (err) {
+        // Silently fail
+    }
 });
 electron_1.ipcMain.on('delete-item', (event, id) => {
     const history = store.get('history');
     const itemToDelete = history.find(item => item.id === id);
-    // If we are deleting the item currently in the clipboard memory, reset memory
-    // so it can be re-copied immediately if needed.
     if (itemToDelete && itemToDelete.content === lastClipboardContent) {
         lastClipboardContent = '';
     }
@@ -212,7 +257,7 @@ electron_1.ipcMain.on('delete-item', (event, id) => {
 });
 electron_1.ipcMain.on('clear-history', () => {
     store.set('history', []);
-    lastClipboardContent = ''; // Important: Reset so we can re-copy same text
+    lastClipboardContent = '';
     mainWindow?.webContents.send('clipboard-updated', []);
 });
 electron_1.ipcMain.on('update-item-content', (event, { id, content }) => {
@@ -220,7 +265,7 @@ electron_1.ipcMain.on('update-item-content', (event, { id, content }) => {
     const index = history.findIndex(item => item.id === id);
     if (index !== -1) {
         history[index].content = content;
-        history[index].timestamp = Date.now(); // Update timestamp on edit? Maybe.
+        history[index].timestamp = Date.now();
         store.set('history', history);
         mainWindow?.webContents.send('clipboard-updated', history);
     }

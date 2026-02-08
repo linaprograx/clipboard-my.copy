@@ -23,29 +23,37 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('all');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [editingItem, setEditingItem] = useState<{ id: string, content: string } | null>(null);
+
+  const handleEdit = (id: string, currentContent: string) => {
+    setEditingItem({ id, content: currentContent });
+  };
+
+  const saveEdit = () => {
+    if (editingItem && window.electronAPI) {
+      window.electronAPI.updateItemContent(editingItem.id, editingItem.content);
+      setEditingItem(null);
+    }
+  };
 
   const cn = (...inputs: (string | undefined | null | false)[]) => twMerge(clsx(inputs));
 
   // Clipboard Listener & Mock Data
   useEffect(() => {
     if (window.electronAPI) {
-      // Initial Load (if store exists)
-      // Initial Load (if store exists)
+      // Initial Load
       window.electronAPI.getHistory().then(h => {
-        console.log("Initial history loaded:", h);
         setHistory(h);
       });
 
       // Listen for updates
       const cleanup = window.electronAPI.onClipboardUpdate((newHistory: ClipboardItem[]) => {
-        console.log("Renderer received FULL UPDATE. Count:", newHistory.length);
         setHistory(newHistory);
       });
-      // Also listen for single item polling updates if simpler
+      // Poll listener
       window.electronAPI.onClipboardChanged((newItem: ClipboardItem) => {
-        console.log("Renderer received SINGLE ITEM:", newItem);
+        console.log('[Frontend] Received Clipboard Update:', newItem.id, newItem.type);
         setHistory(prev => {
-          // Avoid dupes
           if (prev.find(p => p.id === newItem.id)) return prev;
           return [newItem, ...prev];
         });
@@ -53,7 +61,7 @@ export function App() {
 
       return cleanup;
     }
-  }, []); // Only run once on mount
+  }, []);
 
   const filteredHistory = history.filter(item => {
     if (activeCategory === 'pinned' && !item.pinned) return false;
@@ -63,11 +71,8 @@ export function App() {
     return item.content.toLowerCase().includes(searchQuery.toLowerCase());
   });
 
-  console.log(`Render: History ${history.length} -> Filtered ${filteredHistory.length}`);
-
   // Sort: Pinned first
   const sortedHistory = [...filteredHistory].sort((a, b) => (Number(b.pinned) - Number(a.pinned)) || (b.timestamp - a.timestamp));
-
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -82,14 +87,13 @@ export function App() {
       } else if (e.key === 'ArrowUp') {
         setSelectedIndex(prev => Math.max(prev - 4, 0));
       } else if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
-        // CMD+C: Copy selected item to clipboard (without pasting)
         const item = sortedHistory[selectedIndex];
         if (item) {
-          navigator.clipboard.writeText(item.content); // Simple web API for text
+          navigator.clipboard.writeText(item.content);
         }
       } else if (e.key === 'Enter') {
         const item = sortedHistory[selectedIndex];
-        if (item) window.electronAPI?.pasteItem(item);
+        if (item) window.electronAPI?.pasteItem(item.id);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -185,7 +189,8 @@ export function App() {
                 <ClipboardCard
                   item={item}
                   isActive={index === selectedIndex}
-                  onClick={() => window.electronAPI ? window.electronAPI.pasteItem(item) : console.log("Click Paste", item)}
+                  onClick={() => window.electronAPI ? window.electronAPI.pasteItem(item.id) : console.log("Click Paste", item.id)}
+                  onEdit={handleEdit}
                 />
               </div>
             ))
@@ -195,6 +200,37 @@ export function App() {
         {/* Bottom App Region (Drag) */}
         <div className="h-3 w-full app-region-drag shrink-0 bg-transparent absolute bottom-0 left-0" />
       </div>
+
+      {/* Edit Modal Overlay */}
+      {editingItem && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-[90%] max-w-md bg-[#2c2c2e] border border-white/10 rounded-2xl shadow-2xl p-6 flex flex-col gap-4">
+            <h3 className="text-white font-bold text-lg">Editar Contenido</h3>
+            <textarea
+              value={editingItem.content}
+              onChange={(e) => setEditingItem({ ...editingItem, content: e.target.value })}
+              className="w-full h-32 bg-black/20 border border-white/5 rounded-xl p-3 text-white text-sm focus:outline-none focus:border-white/20 resize-none"
+              placeholder="Escribe aquí..."
+              autoFocus
+            />
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setEditingItem(null)}
+                className="px-4 py-2 rounded-lg text-white/70 hover:text-white hover:bg-white/5 transition-colors text-sm font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={saveEdit}
+                className="px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white shadow-lg transition-all text-sm font-bold"
+              >
+                Guardar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

@@ -14,8 +14,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('clipboard-changed', subscription);
         return () => ipcRenderer.removeListener('clipboard-changed', subscription);
     },
-    pasteItem: (item: ClipboardItem) => ipcRenderer.send('paste-item', item),
-    pinItem: (id: string) => ipcRenderer.send('pin-item', id),
+    pasteItem: (id: string) => ipcRenderer.send('paste-item', id),
+    copyItem: (id: string) => ipcRenderer.send('copy-item', id),
+    togglePin: (id: string) => ipcRenderer.send('toggle-pin', id),
     deleteItem: (id: string) => ipcRenderer.send('delete-item', id),
     clearHistory: () => ipcRenderer.send('clear-history'),
     updateItemContent: (id: string, content: string) => ipcRenderer.send('update-item-content', { id, content }),

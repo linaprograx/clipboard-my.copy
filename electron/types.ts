@@ -5,4 +5,7 @@ export interface ClipboardItem {
     preview?: string; // For images or truncated text
     timestamp: number;
     pinned: boolean;
+    metadata?: {
+        originalPath?: string;
+    };
 }

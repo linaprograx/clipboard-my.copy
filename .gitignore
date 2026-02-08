@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+//Electron genera basura 
+node_modules
+dist
+out
+.env
+.DS_Store

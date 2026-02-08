@@ -12,8 +12,9 @@ export interface IElectronAPI {
     getHistory: () => Promise<ClipboardItem[]>;
     onClipboardUpdate: (callback: (history: ClipboardItem[]) => void) => () => void;
     onClipboardChanged: (callback: (item: ClipboardItem) => void) => () => void;
-    pasteItem: (item: ClipboardItem) => void;
-    pinItem: (id: string) => void;
+    pasteItem: (id: string) => void;
+    copyItem: (id: string) => void;
+    togglePin: (id: string) => void;
     deleteItem: (id: string) => void;
     clearHistory: () => void;
     updateItemContent: (id: string, content: string) => void;

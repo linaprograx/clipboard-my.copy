@@ -15,12 +15,17 @@ interface ClipboardCardProps {
     item: ClipboardItem;
     isActive: boolean;
     onClick: () => void;
+    onEdit: (id: string, currentContent: string) => void;
 }
 
-export function ClipboardCard({ item, isActive, onClick }: ClipboardCardProps) {
+export function ClipboardCard({ item, isActive, onClick, onEdit }: ClipboardCardProps) {
+    if (item.type === 'image') {
+        console.log('[Card] RENDER IMAGE:', JSON.stringify(item, null, 2));
+    }
     const cn = (...inputs: (string | undefined | null | false)[]) => twMerge(clsx(inputs));
 
     const getTheme = () => {
+        // ... (existing theme logic) ...
         if (item.pinned) return {
             bg: 'bg-[#fbbf24]', // Amber
             text: 'text-white',
@@ -71,6 +76,32 @@ export function ClipboardCard({ item, isActive, onClick }: ClipboardCardProps) {
                 item.pinned && !isActive ? "ring-1 ring-amber-400/30" : ""
             )}
         >
+            {/* Action Buttons (Moved to global scope to ensure visibility) */}
+            <div className="absolute top-2 right-2 flex gap-1 opacity-100 group-hover:opacity-100 transition-opacity z-50">
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onEdit(item.id, item.content);
+                    }}
+                    className="p-1.5 rounded-full bg-black/20 hover:bg-black/40 text-white backdrop-blur-md"
+                    title="Editar"
+                >
+                    <Edit2 size={10} />
+                </button>
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm("¿Borrar elemento?")) {
+                            window.electronAPI?.deleteItem(item.id);
+                        }
+                    }}
+                    className="p-1.5 rounded-full bg-red-500/80 hover:bg-red-600 text-white backdrop-blur-md"
+                    title="Borrar"
+                >
+                    <Trash2 size={10} />
+                </button>
+            </div>
+
             {/* Header: Compact Vibrant Color Block (Approx 35% height) */}
             <div className={cn("h-[35%] px-4 py-3 flex items-start justify-between relative overflow-hidden", theme.bg)}>
 
@@ -91,42 +122,24 @@ export function ClipboardCard({ item, isActive, onClick }: ClipboardCardProps) {
                         {getTimeAgo(item.timestamp)}
                     </span>
                 </div>
-
-                {/* Action Buttons (Visible on Hover/Active) */}
-                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            const newContent = prompt("Editar contenido:", item.content);
-                            if (newContent !== null) {
-                                window.electronAPI?.updateItemContent(item.id, newContent);
-                            }
-                        }}
-                        className="p-1.5 rounded-full bg-black/20 hover:bg-black/40 text-white backdrop-blur-md"
-                        title="Editar"
-                    >
-                        <Edit2 size={10} />
-                    </button>
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            if (confirm("¿Borrar elemento?")) {
-                                window.electronAPI?.deleteItem(item.id);
-                            }
-                        }}
-                        className="p-1.5 rounded-full bg-red-500/80 hover:bg-red-600 text-white backdrop-blur-md"
-                        title="Borrar"
-                    >
-                        <Trash2 size={10} />
-                    </button>
-                </div>
             </div>
 
             {/* Body: Dark Content */}
             <div className="flex-1 p-3 flex flex-col relative bg-[#1e1e1e]">
-                {/* Content Text */}
-                <div className="flex-1 overflow-hidden mask-linear-fade relative">
-                    {item.content.trim().length > 0 ? (
+                {/* Content Text or Image */}
+                <div className="flex-1 overflow-hidden mask-linear-fade relative w-full h-full">
+                    {item.type === 'image' && item.preview ? (
+                        <img
+                            src={item.preview}
+                            alt="Clipboard Preview"
+                            className="w-full h-full object-cover rounded-md opacity-90 hover:opacity-100 transition-opacity"
+                            onError={(e) => {
+                                console.error('Image Load Error:', item.preview, e);
+                                e.currentTarget.style.display = 'none'; // Hide broken image
+                                e.currentTarget.parentElement?.classList.add('bg-red-500/20'); // Visual indicator
+                            }}
+                        />
+                    ) : item.content.trim().length > 0 ? (
                         <p className={cn(
                             "text-[10px] leading-[1.4] break-words whitespace-pre-wrap select-none", // Prevent text selection on card click
                             item.pinned ? "text-white font-medium" : "text-gray-400 font-mono"
@@ -140,32 +153,42 @@ export function ClipboardCard({ item, isActive, onClick }: ClipboardCardProps) {
                     )}
                 </div>
 
-                {/* Footer Char Count */}
-                <div className="mt-1 flex justify-between items-end text-gray-500">
+                {/* Footer Char Count & Actions */}
+                <div className="mt-1 flex justify-between items-end text-gray-500 relative z-30">
                     <span className="text-[9px] font-bold tracking-wider opacity-60">
-                        {item.content.length} c
+                        {item.type === 'image' ? 'IMG' : `${item.content.length} c`}
                     </span>
 
-                    {/* Copy Button (Bottom Right) */}
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            // Copy to clipboard using Web API
-                            navigator.clipboard.writeText(item.content);
-                            // Visual feedback could be added here
-                        }}
-                        className="p-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white hover:text-green-400 transition-colors z-20"
-                        title="Copiar"
-                    >
-                        <Copy size={12} />
-                    </button>
+                    <div className="flex gap-2">
+                        {/* Pin Button */}
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                window.electronAPI?.togglePin(item.id);
+                            }}
+                            className={cn(
+                                "p-1.5 rounded-full backdrop-blur-md transition-colors border border-white/10",
+                                item.pinned
+                                    ? "bg-amber-400 text-black hover:bg-amber-300"
+                                    : "bg-black/40 text-white hover:bg-black/60 hover:text-amber-400"
+                            )}
+                            title={item.pinned ? "Desfijar" : "Fijar"}
+                        >
+                            <Lock size={12} fill={item.pinned ? "currentColor" : "none"} />
+                        </button>
 
-                    {/* Lock Overlay (Small) */}
-                    {item.pinned && (
-                        <div className="absolute bottom-3 right-8 flex items-center gap-1 text-amber-500/80">
-                            <Lock size={10} strokeWidth={2.5} />
-                        </div>
-                    )}
+                        {/* Copy Button */}
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                window.electronAPI?.copyItem(item.id);
+                            }}
+                            className="p-1.5 rounded-full bg-black/40 hover:bg-black/60 text-white backdrop-blur-md transition-colors border border-white/10"
+                            title="Copiar"
+                        >
+                            <Copy size={12} />
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
