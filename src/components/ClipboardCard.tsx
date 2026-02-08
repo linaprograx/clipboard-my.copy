@@ -52,63 +52,57 @@ const getTimeAgo = (timestamp: number) => {
 const getItemTheme = (item: ClipboardItem) => {
     // 1. Pinned (Overrides everything else with Gold)
     if (item.pinned) return {
-        border: "border-amber-500/20",
-        activeBorder: "border-amber-400",
-        shadow: "shadow-[0_0_30px_rgba(251,191,36,0.15)]",
-        iconColor: "text-amber-400",
-        badgeBg: "bg-amber-500/10",
+        container: "bg-amber-900/20 border-amber-500/50",
+        active: "border-amber-400 shadow-[0_0_30px_rgba(251,191,36,0.3)] bg-amber-900/30",
+        iconColor: "text-amber-500",
+        badgeBg: "bg-amber-500/20",
         label: "Fijado",
-        gradient: "from-amber-500/5 to-transparent"
+        gradient: "from-amber-500/20 to-transparent"
     };
 
     // 2. Type-based Themes
     switch (item.type) {
         case 'image': return {
-            border: "border-indigo-500/20",
-            activeBorder: "border-indigo-400",
-            shadow: "shadow-[0_0_30px_rgba(129,140,248,0.2)]",
-            iconColor: "text-indigo-400",
-            badgeBg: "bg-indigo-500/10",
+            container: "bg-blue-900/30 border-blue-500/40",
+            active: "border-blue-400 shadow-[0_0_30px_rgba(59,130,246,0.3)] bg-blue-900/40",
+            iconColor: "text-blue-400",
+            badgeBg: "bg-blue-500/20",
             label: "Imagen",
-            gradient: "from-indigo-500/5 to-transparent"
+            gradient: "from-blue-600/20 to-transparent"
         };
         case 'file': return {
-            border: "border-orange-500/20",
-            activeBorder: "border-orange-400",
-            shadow: "shadow-[0_0_30px_rgba(251,146,60,0.15)]",
-            iconColor: "text-orange-400",
-            badgeBg: "bg-orange-500/10",
+            container: "bg-amber-900/30 border-amber-500/40",
+            active: "border-amber-400 shadow-[0_0_30px_rgba(245,158,11,0.3)] bg-amber-900/40",
+            iconColor: "text-amber-400",
+            badgeBg: "bg-amber-500/20",
             label: "Archivo",
-            gradient: "from-orange-500/5 to-transparent"
+            gradient: "from-amber-600/20 to-transparent"
         };
         case 'text':
             if (item.metadata?.openGraphValues?.title) return { // Link
-                border: "border-emerald-500/20",
-                activeBorder: "border-emerald-400",
-                shadow: "shadow-[0_0_30px_rgba(52,211,153,0.15)]",
+                container: "bg-emerald-900/30 border-emerald-500/40",
+                active: "border-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.3)] bg-emerald-900/40",
                 iconColor: "text-emerald-400",
-                badgeBg: "bg-emerald-500/10",
+                badgeBg: "bg-emerald-500/20",
                 label: "Enlace",
-                gradient: "from-emerald-500/5 to-transparent"
+                gradient: "from-emerald-600/20 to-transparent"
             };
             // Default Text
             return {
-                border: "border-white/5", // Very neutral for text
-                activeBorder: "border-white/40",
-                shadow: "shadow-[0_0_20px_rgba(255,255,255,0.05)]",
-                iconColor: "text-slate-400",
-                badgeBg: "bg-white/5",
+                container: "bg-neutral-800/60 border-neutral-600/40",
+                active: "border-neutral-400 shadow-[0_0_20px_rgba(255,255,255,0.1)] bg-neutral-800/80",
+                iconColor: "text-neutral-400",
+                badgeBg: "bg-neutral-700/50",
                 label: "Texto",
-                gradient: "from-white/0 to-transparent" // No gradient for text to keep it super clean
+                gradient: "from-neutral-700/20 to-transparent"
             };
         default: return {
-            border: "border-white/5",
-            activeBorder: "border-white/40",
-            shadow: "shadow-[0_0_20px_rgba(255,255,255,0.05)]",
-            iconColor: "text-slate-400",
-            badgeBg: "bg-white/5",
-            label: "Desconocido",
-            gradient: "from-white/0 to-transparent"
+            container: "bg-red-900/30 border-red-500/40",
+            active: "border-red-400 shadow-[0_0_20px_rgba(239,68,68,0.3)]",
+            iconColor: "text-red-500",
+            badgeBg: "bg-red-500/20",
+            label: `UNKNOWN: ${item.type}`,
+            gradient: "from-red-500/20 to-transparent"
         };
     }
 };
@@ -121,18 +115,19 @@ const CardShell = ({ children, isActive, theme, onClick }: { children: React.Rea
         onClick={onClick}
         className={cn(
             "group relative flex flex-col w-full h-full rounded-[20px] overflow-hidden cursor-pointer transition-all duration-300",
-            // Base styles
-            "bg-[#1c1c1e] border",
-            theme.border,
-            // Active State
+            "border", // Constant border width base
+            // Apply base container styles (background + border color)
+            isActive ? theme.active : theme.container,
+
+            // Active State Enhancements (Scale, Z-Index)
             isActive
-                ? cn(theme.activeBorder, theme.shadow, "scale-[1.02] z-10")
-                : "hover:border-white/10 hover:bg-[#252527] hover:scale-[1.01]"
+                ? "scale-[1.02] z-10"
+                : "hover:scale-[1.01] hover:brightness-110"
         )}
     >
-        {/* Subtle Gradient Hint */}
+        {/* Gradient Hint - Increased opacity for debug */}
         {isActive && <div className={cn("absolute inset-0 bg-gradient-to-br pointer-events-none opacity-100", theme.gradient)} />}
-        {!isActive && <div className={cn("absolute inset-0 bg-gradient-to-br pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500", theme.gradient)} />}
+        {!isActive && <div className={cn("absolute inset-0 bg-gradient-to-br pointer-events-none opacity-100 group-hover:opacity-100 transition-opacity duration-500", theme.gradient)} />}
 
         {/* Content Container (z-index to sit above gradient) */}
         <div className="relative z-10 flex flex-col w-full h-full">
@@ -310,6 +305,8 @@ export function ClipboardCard({ item, isActive, onClick, onEdit }: ClipboardCard
     }
 
     const theme = getItemTheme(item);
+
+
 
     return (
         <CardShell isActive={isActive} theme={theme} onClick={onClick}>
