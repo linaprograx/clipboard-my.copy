@@ -113,9 +113,11 @@ export class FileUtils {
 
         const ext = path.extname(filePath).toLowerCase();
         const isImageFile = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.ico', '.svg'].includes(ext);
+        const isPdf = ext === '.pdf';
 
         try {
             // 1. QuickLook (Best for PDFs, Videos, some Images)
+            // Especially critical for PDFs to get the first page
             try {
                 const thumbnail = await nativeImage.createThumbnailFromPath(filePath, { width: 600, height: 600 });
                 if (!thumbnail.isEmpty()) {
@@ -159,7 +161,12 @@ export class FileUtils {
             preview = GENERIC_FILE_ICON;
         }
 
-        // Force 'image' type if we have any kind of preview (which we always should now)
-        return { preview, type: 'image' };
+        // Return 'image' only if it's strictly an image file, otherwise 'file' for PDF/Docs
+        const finalType = isImageFile ? 'image' : (preview ? 'file' : 'text');
+
+        return {
+            preview,
+            type: finalType as any
+        };
     }
 }

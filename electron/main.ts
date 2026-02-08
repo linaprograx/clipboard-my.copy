@@ -251,12 +251,31 @@ ipcMain.on('paste-item', (event, id: string) => {
             }
         }
 
-        // 2. Hide window
-        mainWindow?.hide();
+        // 2. Hide window and paste
+        if (process.platform === 'darwin') {
+            app.hide();
+        } else {
+            mainWindow?.hide();
+        }
 
-        // 3. Simulate paste (CMD+V)
-        const script = `osascript -e 'tell application "System Events" to keystroke "v" using command down'`;
-        exec(script);
+        // 3. Simulate Paste Action (Cmd+V)
+        setTimeout(() => {
+            try {
+                console.log('[Main] Simulating Paste...');
+                const script = `
+                tell application "System Events"
+                    keystroke "v" using command down
+                end tell
+            `;
+                // Execute AppleScript
+                const { exec } = require('child_process');
+                exec(`osascript -e '${script}'`, (error: any) => {
+                    if (error) console.error('Paste Error:', error);
+                });
+            } catch (e) {
+                console.error('Paste Exception:', e);
+            }
+        }, 150);
     } catch (err) {
         // Silently fail
     }

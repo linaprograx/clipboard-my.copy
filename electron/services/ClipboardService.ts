@@ -5,6 +5,7 @@ import { createHash } from 'crypto';
 import { ClipboardItem } from '../types';
 import { FileUtils } from '../utils/FileUtils';
 import { ImageStorageService } from './ImageStorageService';
+import { LinkPreviewService } from './LinkPreviewService';
 import path from 'path';
 
 export class ClipboardService {
@@ -175,9 +176,17 @@ export class ClipboardService {
 
                 const isCode = this.detectCode(text);
 
+                // Check if it's a URL
+                let isUrl = false;
+                try {
+                    // Basic URL validation
+                    const url = new URL(text);
+                    isUrl = ['http:', 'https:'].includes(url.protocol);
+                } catch (e) { }
+
                 newItemCandidate = {
                     id: uuidv4(),
-                    type: html ? 'html' : 'text',
+                    type: isUrl ? 'text' : (html ? 'html' : 'text'),
                     content: text,
                     timestamp: Date.now(),
                     pinned: false,
@@ -187,6 +196,11 @@ export class ClipboardService {
                         isCode: isCode
                     }
                 };
+
+                // If it's a URL, fetch metadata asynchronously
+                if (isUrl && !isCode) {
+                    this.enrichLinkItem(newItemCandidate);
+                }
             }
         }
 
@@ -194,6 +208,39 @@ export class ClipboardService {
         if (newItemCandidate && contentHash) {
             this.handleNewItem(newItemCandidate, contentHash);
             this.lastClipboardHash = contentHash;
+        }
+    }
+
+    private async enrichLinkItem(item: ClipboardItem) {
+        if (!item.metadata) return; // Should not happen
+
+        try {
+            console.log(`[ClipboardService] Fetching metadata for: ${item.content}`);
+            const metadata = await LinkPreviewService.fetchMetadata(item.content);
+
+            if (metadata.openGraphValues?.title || metadata.openGraphValues?.image) {
+
+                // Update the item in the store
+                const history = this.store.get('history', []);
+                const index = history.findIndex(i => i.id === item.id);
+
+                if (index !== -1) {
+                    history[index].metadata = {
+                        ...history[index].metadata,
+                        ...metadata
+                    };
+
+                    this.store.set('history', history);
+
+                    // Notify renderer of update
+                    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                        this.mainWindow.webContents.send('clipboard-updated', history);
+                    }
+                    console.log(`[ClipboardService] Enriched Link: ${item.content} -> ${metadata.openGraphValues.title}`);
+                }
+            }
+        } catch (e) {
+            console.error('[ClipboardService] Failed to enrich link:', e);
         }
     }
 

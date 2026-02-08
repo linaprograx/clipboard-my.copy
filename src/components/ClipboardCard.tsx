@@ -1,6 +1,6 @@
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { Lock, Copy, Edit2, Trash2 } from 'lucide-react';
+import { Lock, Copy, Edit2, Trash2, Link } from 'lucide-react';
 
 interface ClipboardItem {
     id: string;
@@ -9,6 +9,14 @@ interface ClipboardItem {
     preview?: string;
     timestamp: number;
     pinned: boolean;
+    metadata?: {
+        openGraphValues?: {
+            title?: string;
+            image?: string;
+            description?: string;
+            url?: string;
+        }
+    };
 }
 
 interface ClipboardCardProps {
@@ -38,11 +46,17 @@ export function ClipboardCard({ item, isActive, onClick, onEdit }: ClipboardCard
             name: 'Imágen',
             icon: <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center"><span className="font-bold text-white text-lg">I</span></div>
         };
+        if (item.metadata?.openGraphValues?.title) return {
+            bg: 'bg-[#ef4444]', // Red/Pink
+            text: 'text-white',
+            name: 'Enlace Web',
+            icon: <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center"><Link size={18} className="text-white" /></div>
+        };
         if (item.content.startsWith('http')) return {
             bg: 'bg-[#ef4444]', // Red/Pink
             text: 'text-white',
             name: 'Enlace',
-            icon: <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center"><span className="font-bold text-white text-lg">@</span></div>
+            icon: <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center"><Link size={18} className="text-white" /></div>
         };
         // Default Blue
         return {
@@ -139,6 +153,26 @@ export function ClipboardCard({ item, isActive, onClick, onEdit }: ClipboardCard
                                 e.currentTarget.parentElement?.classList.add('bg-red-500/20'); // Visual indicator
                             }}
                         />
+                    ) : item.metadata?.openGraphValues?.title ? (
+                        <div className="flex flex-col h-full">
+                            {item.metadata.openGraphValues.image ? (
+                                <div className="h-2/3 w-full relative overflow-hidden rounded-md mb-2">
+                                    <img
+                                        src={item.metadata.openGraphValues.image}
+                                        className="object-cover w-full h-full opacity-80"
+                                        alt="Link Preview"
+                                    />
+                                </div>
+                            ) : null}
+                            <div className="flex flex-col">
+                                <span className="text-white font-bold text-[11px] leading-tight line-clamp-2">
+                                    {item.metadata.openGraphValues.title}
+                                </span>
+                                <span className="text-white/50 text-[9px] mt-1 truncate">
+                                    {item.metadata.openGraphValues.url || item.content}
+                                </span>
+                            </div>
+                        </div>
                     ) : item.content.trim().length > 0 ? (
                         <p className={cn(
                             "text-[10px] leading-[1.4] break-words whitespace-pre-wrap select-none", // Prevent text selection on card click

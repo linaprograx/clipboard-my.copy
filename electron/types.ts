@@ -3,6 +3,12 @@ export interface ClipboardItemMetadata {
     hash?: string;
     htmlContent?: string;
     isCode?: boolean;
+    openGraphValues?: {
+        title?: string;
+        image?: string;
+        description?: string;
+        url?: string;
+    };
 }
 
 export interface ClipboardItem {
