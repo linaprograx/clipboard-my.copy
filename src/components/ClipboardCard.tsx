@@ -1,6 +1,11 @@
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { Lock, Copy, Edit2, Trash2, Image as ImageIcon, Type, Globe, File } from 'lucide-react';
+import {
+    Lock, Edit2, Trash2, Link, FileText, Image as ImageIcon,
+    Calendar
+} from 'lucide-react';
+
+// --- Types ---
 
 interface ClipboardItem {
     id: string;
@@ -28,238 +33,261 @@ interface ClipboardCardProps {
     onEdit: (id: string, currentContent: string) => void;
 }
 
-export function ClipboardCard({ item, isActive, onClick, onEdit }: ClipboardCardProps) {
-    const cn = (...inputs: (string | undefined | null | false)[]) => twMerge(clsx(inputs));
+// --- Utility Functions ---
 
-    const getTimeAgo = (timestamp: number) => {
-        // eslint-disable-next-line
-        const diff = Date.now() - timestamp;
-        if (diff < 60000) return 'Ahora';
-        const mins = Math.floor(diff / 60000);
-        if (mins < 60) return `${mins}m`;
-        const hours = Math.floor(mins / 60);
-        if (hours < 24) return `${hours}h`;
-        return '1d+';
+const cn = (...inputs: (string | undefined | null | false)[]) => twMerge(clsx(inputs));
+
+const getTimeAgo = (timestamp: number) => {
+    const diff = Date.now() - timestamp;
+    if (diff < 60000) return 'ahora';
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60) return `${mins}m`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h`;
+    return `${Math.floor(hours / 24)}d`;
+};
+
+// --- Sub-Components ---
+
+// 1. Card Shell: Handles the container, border, shadow, animations
+const CardShell = ({ children, isActive, isPinned, onClick }: { children: React.ReactNode, isActive: boolean, isPinned: boolean, onClick: () => void }) => (
+    <div
+        onClick={onClick}
+        className={cn(
+            "group relative flex flex-col w-full h-full rounded-[20px] overflow-hidden cursor-pointer transition-all duration-300",
+            // Base styles
+            "bg-[#1c1c1e] border",
+            // Active State
+            isActive
+                ? "border-amber-400/50 shadow-[0_0_30px_rgba(251,191,36,0.15)] scale-[1.02] z-10"
+                : "border-white/5 hover:border-white/10 hover:bg-[#252527] hover:scale-[1.01]",
+            // Pinned State (Subtle ring if not active)
+            isPinned && !isActive ? "ring-1 ring-amber-500/20" : ""
+        )}
+    >
+        {children}
+    </div>
+);
+
+// 2. Card Header: Icon, Type Label, Actions
+const CardHeader = ({ item, onEdit }: { item: ClipboardItem, onEdit: (id: string, c: string) => void }) => {
+    const handleDelete = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (confirm("¿Borrar elemento?")) window.electronAPI?.deleteItem(item.id);
     };
 
-    // --- CONFIGURATION BY TYPE ---
-    const getConfig = () => {
-        if (item.pinned) return {
-            color: 'text-amber-400',
-            bg: 'bg-amber-400',
-            label: 'Keep',
-            icon: <Lock size={14} className="text-amber-950" fill="currentColor" />
-        };
-
-        switch (item.type) {
-            case 'image':
-                return {
-                    color: 'text-orange-400',
-                    bg: 'bg-orange-400',
-                    label: 'Image',
-                    icon: <ImageIcon size={14} className="text-orange-950" />
-                };
-            case 'file':
-                return {
-                    color: 'text-blue-400',
-                    bg: 'bg-blue-400',
-                    label: 'File',
-                    icon: <File size={14} className="text-blue-950" />
-                };
-            case 'text':
-            case 'rtf':
-            case 'html':
-                if (item.metadata?.openGraphValues?.title || item.content.startsWith('http')) {
-                    return {
-                        color: 'text-rose-400',
-                        bg: 'bg-rose-400',
-                        label: 'Link',
-                        icon: <Globe size={14} className="text-rose-950" />
-                    };
-                }
-                return {
-                    color: 'text-emerald-400',
-                    bg: 'bg-emerald-400',
-                    label: 'Text',
-                    icon: <Type size={14} className="text-emerald-950" />
-                };
-            default:
-                return {
-                    color: 'text-neutral-400',
-                    bg: 'bg-neutral-400',
-                    label: 'Item',
-                    icon: <Copy size={14} className="text-neutral-950" />
-                };
-        }
-    };
-
-    const config = getConfig();
-    const isLink = !!item.metadata?.openGraphValues?.title || item.content.startsWith('http');
-
-    // --- RENDER VARIANTS ---
-
-    const renderBody = () => {
-        // 1. IMAGE VARIANT
-        if (item.type === 'image' || (item.preview && item.type !== 'file')) {
-            return (
-                <div className="w-full h-full relative group/image bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]">
-                    {item.preview ? (
-                        <img
-                            src={item.preview}
-                            alt="Preview"
-                            className="w-full h-full object-cover opacity-90 group-hover/card:opacity-100 transition-opacity duration-500"
-                            onError={(e) => {
-                                e.currentTarget.style.display = 'none';
-                                e.currentTarget.parentElement?.classList.add('flex', 'items-center', 'justify-center', 'bg-neutral-800');
-                                // Force fallback display
-                            }}
-                        />
-                    ) : null}
-                    {/* Fallback Label if image missing/hidden */}
-                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none -z-0">
-                        <ImageIcon size={32} className="text-white/10 mb-2" />
-                        <span className="text-white/20 font-black text-xs tracking-[0.2em]">IMG</span>
-                    </div>
-                </div>
-            );
-        }
-
-        // 2. LINK VARIANT
-        if (isLink && item.metadata?.openGraphValues) {
-            const og = item.metadata.openGraphValues;
-            return (
-                <div className="flex flex-col h-full w-full bg-[#1A1A1A]">
-                    {/* OG Image Part */}
-                    <div className="h-[60%] w-full relative overflow-hidden bg-black/40 border-b border-white/5">
-                        {og.image ? (
-                            <img src={og.image} className="w-full h-full object-cover opacity-80 group-hover/card:scale-105 transition-transform duration-700" alt="OG" />
-                        ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                                <Globe size={32} className={cn("opacity-20", config.color)} />
-                            </div>
-                        )}
-                    </div>
-                    {/* Meta Part */}
-                    <div className="h-[40%] p-3 flex flex-col justify-center bg-gradient-to-t from-black/60 to-transparent">
-                        <span className="text-white font-bold text-[11px] leading-tight line-clamp-2 mb-1">
-                            {og.title || item.content}
-                        </span>
-                        <span className={cn("text-[9px] truncate opacity-60 font-medium", config.color)}>
-                            {og.url ? new URL(og.url).hostname : 'Enlace web'}
-                        </span>
-                    </div>
-                </div>
-            );
-        }
-
-        // 3. FILE VARIANT
-        if (item.type === 'file' || item.preview) {
-            return (
-                <div className="w-full h-full flex flex-col items-center justify-center p-4 relative bg-[#18181b]">
-                    {item.preview ? (
-                        <div className="w-16 h-16 mb-3 rounded-lg overflow-hidden shadow-lg ring-1 ring-white/10 bg-white">
-                            <img src={item.preview} className="w-full h-full object-cover" alt="File" />
-                        </div>
-                    ) : (
-                        <div className={cn("w-14 h-14 mb-3 rounded-xl flex items-center justify-center bg-white/5", config.color)}>
-                            <File size={28} />
-                        </div>
-                    )}
-                    <span className="text-white/90 font-medium text-[10px] text-center line-clamp-2 px-2 leading-relaxed">
-                        {item.content}
-                    </span>
-                    <div className="absolute top-2 right-2">
-                        <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-white/10 text-white/50 border border-white/5">
-                            {item.content.split('.').pop()?.toUpperCase() || 'FILE'}
-                        </span>
-                    </div>
-                </div>
-            );
-        }
-
-        // 4. TEXT VARIANT (Default)
-        return (
-            <div className="w-full h-full p-4 flex flex-col bg-[#1A1A1A]">
-                <p className={cn(
-                    "text-[11px] leading-relaxed break-words whitespace-pre-wrap font-mono tracking-tight",
-                    item.pinned ? "text-white/90" : "text-neutral-400 group-hover/card:text-neutral-300 transition-colors"
-                )}>
-                    {item.content.substring(0, 180)}
-                </p>
-                {/* Fade out at bottom */}
-                <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-[#1A1A1A] to-transparent pointer-events-none" />
-            </div>
-        );
+    const handlePin = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        window.electronAPI?.togglePin(item.id);
     };
 
 
-    // --- MAIN RENDER ---
+
+    const handleEditClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        onEdit(item.id, item.content);
+    };
+
+    // Determine Icon & Label
+    let Icon = FileText;
+    let label = "Texto";
+    let colorClass = "text-blue-400";
+    let bgClass = "bg-blue-500/10";
+
+    if (item.type === 'image') {
+        Icon = ImageIcon;
+        label = "Imagen";
+        colorClass = "text-purple-400";
+        bgClass = "bg-purple-500/10";
+    } else if (item.metadata?.openGraphValues?.title) {
+        Icon = Link;
+        label = "Enlace";
+        colorClass = "text-orange-400";
+        bgClass = "bg-orange-500/10";
+    } else if (item.type === 'file') {
+        Icon = FileText; // Or a FileIcon if we had one specific
+        label = "Archivo";
+        colorClass = "text-emerald-400";
+        bgClass = "bg-emerald-500/10";
+    }
+
+    if (item.pinned) {
+        colorClass = "text-amber-400";
+        bgClass = "bg-amber-500/10";
+    }
+
     return (
-        <div
-            onClick={onClick}
-            className={cn(
-                "group/card relative flex flex-col w-full aspect-square rounded-[22px] overflow-hidden cursor-pointer select-none",
-                "bg-[#1e1e1e] shadow-xl backdrop-blur-md transition-all duration-300",
-                isActive
-                    ? "ring-[3px] ring-white shadow-[0_10px_40px_-10px_rgba(255,255,255,0.2)] scale-[1.02] z-20"
-                    : "hover:scale-[1.01] hover:shadow-2xl border border-white/5 hover:border-white/10 opacity-90 hover:opacity-100",
-                item.pinned && !isActive ? "ring-1 ring-amber-400/40" : ""
-            )}
-        >
-            {/* 1. HEADER (Compact, Identifiable) */}
-            <div className="h-[36px] px-3 flex items-center justify-between shrink-0 bg-[#252525] border-b border-white/5 relative z-10">
-                <div className="flex items-center gap-2">
-                    <div className={cn("w-5 h-5 rounded-md flex items-center justify-center shadow-sm", config.bg)}>
-                        {config.icon}
-                    </div>
-                    <span className={cn("text-[10px] font-bold tracking-wide uppercase", config.color)}>
-                        {config.label}
-                    </span>
+        <div className="flex items-center justify-between px-3 py-2.5 shrink-0 border-b border-white/5 bg-black/20">
+            {/* Left: Icon & Label */}
+            <div className="flex items-center gap-2">
+                <div className={cn("w-6 h-6 rounded-md flex items-center justify-center", bgClass)}>
+                    <Icon size={12} className={colorClass} />
                 </div>
-
-                {/* Right side actions - Visible on hover or active */}
-                <div className="flex gap-1.5 opacity-0 group-hover/card:opacity-100 transition-opacity duration-200">
-                    <button
-                        onClick={(e) => { e.stopPropagation(); window.electronAPI?.togglePin(item.id); }}
-                        className={cn("p-1 rounded bg-white/10 hover:bg-white/20 transition-colors", item.pinned ? "text-amber-400" : "text-neutral-400")}
-                    >
-                        <Lock size={10} fill={item.pinned ? "currentColor" : "none"} />
-                    </button>
-                    <button
-                        onClick={(e) => { e.stopPropagation(); onEdit(item.id, item.content); }}
-                        className="p-1 rounded bg-white/10 hover:bg-white/20 text-neutral-400 transition-colors"
-                    >
-                        <Edit2 size={10} />
-                    </button>
-                    <button
-                        onClick={(e) => { e.stopPropagation(); window.electronAPI.deleteItem(item.id); }}
-                        className="p-1 rounded bg-white/10 hover:bg-red-500/80 text-neutral-400 hover:text-white transition-colors"
-                    >
-                        <Trash2 size={10} />
-                    </button>
-                </div>
-            </div>
-
-            {/* 2. BODY (Main Content) */}
-            <div className="flex-1 min-h-0 w-full relative">
-                {renderBody()}
-            </div>
-
-            {/* 3. FOOTER (Metadata) */}
-            <div className="h-[28px] px-3 flex items-center justify-between shrink-0 bg-[#151515] border-t border-white/5 text-[9px] font-medium text-neutral-500">
-                <span>
-                    {item.type === 'image' && item.metadata?.width
-                        ? `${item.metadata.width}x${item.metadata.height}px`
-                        : `${item.content.length} chars`
-                    }
+                <span className={cn("text-[10px] font-bold tracking-wide uppercase opacity-70", colorClass)}>
+                    {item.pinned ? "Fijado" : label}
                 </span>
-                <span className="opacity-60">{getTimeAgo(item.timestamp)}</span>
             </div>
 
-            {/* pinned Glow overlay (ambient) */}
-            {item.pinned && (
-                <div className="absolute inset-0 rounded-[22px] pointer-events-none ring-1 ring-inset ring-amber-400/20 shadow-[inset_0_0_20px_rgba(251,191,36,0.05)] z-20" />
+            {/* Right: Actions (Visible on Hover/Active) */}
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={handlePin} className={cn("p-1 rounded hover:bg-white/10", item.pinned ? "text-amber-400" : "text-white/40")}>
+                    <Lock size={12} fill={item.pinned ? "currentColor" : "none"} />
+                </button>
+                <button onClick={handleEditClick} className="p-1 rounded hover:bg-white/10 text-white/40 hover:text-white">
+                    <Edit2 size={12} />
+                </button>
+                <button onClick={handleDelete} className="p-1 rounded hover:bg-red-500/20 text-white/40 hover:text-red-400">
+                    <Trash2 size={12} />
+                </button>
+            </div>
+            {/* Always visible copy/options trigger if needed, or just timestamp? */}
+        </div>
+    );
+};
+
+// 3. Card Footer: Metadata
+const CardFooter = ({ item }: { item: ClipboardItem }) => (
+    <div className="flex items-center justify-between px-3 py-2 mt-auto border-t border-white/5 bg-black/10">
+        <span className="text-[9px] font-medium text-white/30 flex items-center gap-1">
+            <Calendar size={8} />
+            {getTimeAgo(item.timestamp)}
+        </span>
+        <span className="text-[9px] font-mono text-white/20">
+            {item.type === 'text' ? `${item.content.length} chars` :
+                item.type === 'image' && item.metadata?.width ? `${item.metadata.width}x${item.metadata.height}` : ''}
+        </span>
+    </div>
+);
+
+// --- Content Variants ---
+
+const TextCard = ({ item }: { item: ClipboardItem }) => (
+    <div className="p-3 flex-1 overflow-hidden relative">
+        <p className={cn(
+            "text-[11px] leading-relaxed text-gray-300 break-words font-mono line-clamp-[6]",
+            "mask-linear-fade" // Assuming this CSS class exists or we allow overflow hidden logic
+        )}>
+            {item.content}
+        </p>
+    </div>
+);
+
+const ImageCard = ({ item }: { item: ClipboardItem }) => (
+    <div className="flex-1 w-full h-full relative bg-black/50 overflow-hidden flex items-center justify-center p-0">
+        {item.preview ? (
+            <img
+                src={item.preview}
+                alt="Preview"
+                className="w-full h-full object-cover opacity-90 transition-opacity group-hover:opacity-100"
+                onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    e.currentTarget.parentElement?.querySelector('.fallback')?.classList.remove('hidden');
+                }}
+            />
+        ) : null}
+
+        {/* Fallback (Hidden by default unless error/no preview) */}
+        <div className={cn("fallback flex flex-col items-center justify-center absolute inset-0", item.preview ? "hidden" : "")}>
+            <ImageIcon size={24} className="text-white/20 mb-1" />
+            <span className="text-[9px] text-white/20 font-bold uppercase tracking-widest">IMG</span>
+        </div>
+    </div>
+);
+
+const LinkCard = ({ item }: { item: ClipboardItem }) => {
+    const og = item.metadata?.openGraphValues;
+    return (
+        <div className="flex-1 flex flex-col h-full overflow-hidden">
+            {/* Image Region (60%) */}
+            {og?.image ? (
+                <div className="h-[60%] w-full relative bg-black/50">
+                    <img
+                        src={og.image}
+                        className="w-full h-full object-cover opacity-80"
+                        alt="OG"
+                    />
+                </div>
+            ) : (
+                <div className="h-[60%] w-full bg-gradient-to-br from-orange-500/10 to-transparent flex items-center justify-center">
+                    <Link size={24} className="text-orange-500/30" />
+                </div>
+            )}
+
+            {/* Content Region (40%) */}
+            <div className="flex-1 p-2.5 flex flex-col justify-center bg-[#18181b]">
+                <h4 className="text-[10px] font-bold text-gray-200 line-clamp-1 leading-tight mb-0.5">
+                    {og?.title || "Enlace Desconocido"}
+                </h4>
+                <p className="text-[9px] text-gray-500 truncate font-mono">
+                    {og?.url || item.content}
+                </p>
+            </div>
+        </div>
+    );
+};
+
+const FileCard = ({ item }: { item: ClipboardItem }) => (
+    <div className="flex-1 flex flex-col items-center justify-center p-4 gap-3 bg-neutral-900/50">
+
+        {/* Preview or Icon */}
+        <div className="w-16 h-16 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shadow-inner overflow-hidden relative">
+            {item.preview ? (
+                <img src={item.preview} className="w-full h-full object-cover" alt="File" />
+            ) : (
+                <FileText size={24} className="text-emerald-500/50" />
             )}
         </div>
+
+        <div className="text-center w-full">
+            <p className="text-[10px] font-medium text-gray-300 truncate w-full px-2">
+                {item.content}
+            </p>
+            <span className="text-[8px] text-gray-500 uppercase tracking-wider font-bold mt-1 block">
+                {item.content.split('.').pop() || 'FILE'}
+            </span>
+        </div>
+    </div>
+);
+
+// --- Main Component ---
+
+export function ClipboardCard({ item, isActive, onClick, onEdit }: ClipboardCardProps) {
+    let Content = TextCard;
+
+    if (item.type === 'image') {
+        Content = ImageCard;
+    } else if (item.metadata?.openGraphValues?.title) {
+        Content = LinkCard;
+    } else if (item.type === 'file') {
+        Content = FileCard;
+    }
+
+    return (
+        <CardShell isActive={isActive} isPinned={item.pinned} onClick={onClick}>
+            {item.type !== 'image' && <CardHeader item={item} onEdit={onEdit} />}
+            {/* Images get full bleed, no header? Or maybe overlay header? 
+                 Let's keep standard header for consistency for now, or maybe make it overlay for images?
+                 Plan said "Full-bleed or maximized thumbnail". 
+                 Let's try: No header for images, just the full image, and actions overlay.
+              */}
+            {item.type === 'image' ? (
+                <>
+                    <ImageCard item={item} />
+                    {/* Overlay Header/Actions for Image */}
+                    <div className="absolute top-0 left-0 w-full p-2 flex justify-between items-start bg-gradient-to-b from-black/60 to-transparent pointer-events-none">
+                        <span className="bg-black/40 backdrop-blur-md px-1.5 py-0.5 rounded text-[8px] font-bold text-white/80 uppercase tracking-widest border border-white/10">IMG</span>
+                        <div className="pointer-events-auto flex gap-1">
+                            <button onClick={(e) => { e.stopPropagation(); window.electronAPI?.togglePin(item.id); }} className="p-1 rounded-full bg-black/40 hover:bg-black/60 text-white/60 hover:text-amber-400 backdrop-blur-md">
+                                <Lock size={10} fill={item.pinned ? "currentColor" : "none"} />
+                            </button>
+                        </div>
+                    </div>
+                </>
+            ) : (
+                <Content item={item} />
+            )}
+
+            {item.type !== 'image' && !item.metadata?.openGraphValues?.title && <CardFooter item={item} />}
+        </CardShell>
     );
 }
