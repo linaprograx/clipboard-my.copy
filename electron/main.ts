@@ -10,22 +10,22 @@ import { ClipboardService } from './services/ClipboardService';
 
 
 // Store Setup
-const store = new Store<{ history: ClipboardItem[] }>({
-    defaults: { history: [] }
-});
-
-// Startup Cleanup: Remove "Division Palermo" card if exists
-const history = store.get('history', []);
-const sanitizedHistory = history.filter(item => {
-    const content = (item.content || '').toLowerCase();
-    const isDivisionPalermo = content.includes('division palermo') || content.includes('división palermo');
-    return !isDivisionPalermo;
-});
-
-if (history.length !== sanitizedHistory.length) {
-    store.set('history', sanitizedHistory);
-    console.log('Sanitized history: Removed "Division Palermo" card(s)');
+let store: Store<{ history: ClipboardItem[] }>;
+try {
+    store = new Store<{ history: ClipboardItem[] }>({
+        defaults: { history: [] },
+        // Add migration support if schema changes significantly,
+        // but for now we essentially handle it via types
+    });
+} catch (err) {
+    console.error('Failed to initialize Electron Store, resetting:', err);
+    const Store = require('electron-store');
+    store = new Store();
+    store.clear();
+    store.set('history', []);
 }
+
+// Startup Cleanup: None (Phase 0/1 sanitized)
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 // Removed electron-squirrel-startup check to prevent issues on non-Windows platforms/dev.
@@ -92,30 +92,7 @@ const createWindow = () => {
     }
 };
 
-// Helper to update store and notify renderer
-const dispatchClipboardUpdate = (newItem: ClipboardItem) => {
-    // ... (logic remains same, shortened for brevity if possible, keeping functionality)
-    const history = store.get('history', []);
-
-    // Avoid exact duplicate at the top
-    if (history.length > 0) {
-        const top = history[0];
-        if (top.type === newItem.type && (top.content === newItem.content || top.preview === newItem.preview)) {
-            // Duplicate detected. Sync if needed.
-            if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('clipboard-updated', history);
-            }
-            return;
-        }
-    }
-
-    const newHistory = [newItem, ...history].slice(0, 100);
-    store.set('history', newHistory);
-
-    if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('clipboard-changed', newItem);
-    }
-};
+// [Cleanup] Removed legacy dispatchClipboardUpdate helper (unused)
 
 // Register Privileged Schemes (MUST be done before app is ready)
 protocol.registerSchemesAsPrivileged([
@@ -230,13 +207,18 @@ ipcMain.on('copy-item', (event, id: string) => {
             const img = nativeImage.createFromDataURL(item.preview);
             if (!img.isEmpty()) {
                 clipboard.writeImage(img);
-                lastClipboardContent = item.preview;
             }
         } else {
-            clipboard.writeText(item.content);
-            lastClipboardContent = item.content;
+            // Support rich text / HTML
+            if (item.metadata?.htmlContent) {
+                clipboard.write({
+                    text: item.content,
+                    html: item.metadata.htmlContent
+                });
+            } else {
+                clipboard.writeText(item.content);
+            }
         }
-        // Do NOT hide window, just copy
     } catch (err) {
         console.error('Failed to copy item:', err);
     }
@@ -256,11 +238,17 @@ ipcMain.on('paste-item', (event, id: string) => {
             const img = nativeImage.createFromDataURL(item.preview);
             if (!img.isEmpty()) {
                 clipboard.writeImage(img);
-                lastClipboardContent = item.preview;
             }
         } else {
-            clipboard.writeText(item.content);
-            lastClipboardContent = item.content;
+            // Support rich text / HTML
+            if (item.metadata?.htmlContent) {
+                clipboard.write({
+                    text: item.content,
+                    html: item.metadata.htmlContent
+                });
+            } else {
+                clipboard.writeText(item.content);
+            }
         }
 
         // 2. Hide window
@@ -278,8 +266,8 @@ ipcMain.on('delete-item', (event, id: string) => {
     const history = store.get('history');
     const itemToDelete = history.find(item => item.id === id);
 
-    if (itemToDelete && itemToDelete.content === lastClipboardContent) {
-        lastClipboardContent = '';
+    if (itemToDelete) {
+        // Cleanup logic if needed
     }
 
     const newHistory = history.filter(item => item.id !== id);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Search, Clock, Star, Copy, Image, Link, Trash2 } from 'lucide-react';
 import { ClipboardCard } from './components/ClipboardCard';
 import { clsx } from 'clsx';

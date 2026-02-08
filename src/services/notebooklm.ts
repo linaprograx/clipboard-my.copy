@@ -1,5 +1,4 @@
 
-import { randomUUID } from 'crypto';
 
 export interface Notebook {
     id: string;

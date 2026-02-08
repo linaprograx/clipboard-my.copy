@@ -1,6 +1,7 @@
 import { clipboard, BrowserWindow, nativeImage } from 'electron';
 import Store from 'electron-store';
 import { v4 as uuidv4 } from 'uuid';
+import { createHash } from 'crypto';
 import { ClipboardItem } from '../types';
 import { FileUtils } from '../utils/FileUtils';
 import { ImageStorageService } from './ImageStorageService';
@@ -10,15 +11,48 @@ export class ClipboardService {
     private store: Store<{ history: ClipboardItem[] }>;
     private mainWindow: BrowserWindow | null;
     private imageStorage: ImageStorageService;
-    private lastClipboardContent: string = '';
+    private lastClipboardHash: string = '';
     private isProcessing: boolean = false;
     private intervalId: NodeJS.Timeout | null = null;
     private POLL_INTERVAL = 1000;
+    private static MAX_HISTORY_SIZE = 200;
 
     constructor(store: Store<{ history: ClipboardItem[] }>, mainWindow: BrowserWindow | null) {
         this.store = store;
         this.mainWindow = mainWindow;
         this.imageStorage = new ImageStorageService();
+        this.migrateLegacyItems();
+    }
+
+    private migrateLegacyItems() {
+        const history = this.store.get('history', []);
+        let changed = false;
+
+        const migrated = history.map(item => {
+            if (!item.metadata || !item.metadata.hash) {
+                // Generate missing hash
+                const hash = this.generateHash(
+                    item.content,
+                    item.type,
+                    item.metadata?.originalPath || item.preview || ''
+                );
+
+                changed = true;
+                return {
+                    ...item,
+                    metadata: {
+                        ...item.metadata,
+                        hash: hash
+                    }
+                };
+            }
+            return item;
+        });
+
+        if (changed) {
+            console.log('[ClipboardService] Migrated legacy items with hashes.');
+            this.store.set('history', migrated);
+        }
     }
 
     public updateMainWindow(window: BrowserWindow | null) {
@@ -51,48 +85,33 @@ export class ClipboardService {
         }
     }
 
+    private generateHash(content: string, type: string, extra: string = ''): string {
+        return createHash('sha256')
+            .update(`${type}:${content}:${extra}`)
+            .digest('hex');
+    }
+
     private async checkClipboard() {
         const formats = clipboard.availableFormats();
-        const history = this.store.get('history', []);
 
-        // CRITICAL DEBUG: Log ALL available formats
-        console.log('========================================');
-        console.log('[ClipboardService] Available Formats:', formats);
-        console.log('[ClipboardService] Format Count:', formats.length);
-
-        // Log the content of each format
-        for (const format of formats) {
-            try {
-                if (format.startsWith('image/')) {
-                    console.log(`[ClipboardService] ${format}: [IMAGE DATA]`);
-                } else {
-                    const content = clipboard.read(format);
-                    console.log(`[ClipboardService] ${format}:`, content ? content.substring(0, 100) : 'EMPTY');
-                }
-            } catch (e) {
-                console.log(`[ClipboardService] ${format}: [ERROR READING]`);
-            }
-        }
-        console.log('========================================');
+        // Fast exit if no formats (clipboard empty/cleared)
+        if (formats.length === 0) return;
 
         let newItemCandidate: ClipboardItem | null = null;
-        let originalPreviewData: string = ''; // Keep track of raw data for duplicate checking
+        let contentHash = '';
 
-        // 1. FILE HANDLER (Delegated to FileUtils)
+        // 1. FILE HANDLER
         const detectedFilePath = FileUtils.detectFilePath(formats);
-
         if (detectedFilePath) {
-            // OPTIMIZATION: Check for duplicate file BEFORE generating thumbnail/saving to disk
-            // This prevents infinite loop and disk spam
-            const signature = `file:${detectedFilePath}`;
-            if (signature === this.lastClipboardContent) {
-                return;
-            }
-
             const fileName = path.basename(detectedFilePath);
+            contentHash = this.generateHash(detectedFilePath, 'file');
+
+            // Fast check against last capture
+            if (contentHash === this.lastClipboardHash) return;
+
             const { preview: dataUrl, type } = await FileUtils.generateFilePreview(detectedFilePath);
 
-            // Convert DataURL to Thumbnail URL
+            // Process thumbnail
             let thumbnailUrl = '';
             if (dataUrl && dataUrl.startsWith('data:')) {
                 const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, "");
@@ -100,107 +119,195 @@ export class ClipboardService {
                 const filename = await this.imageStorage.saveThumbnail(buffer);
                 thumbnailUrl = this.imageStorage.getThumbnailUrl(filename);
             } else if (dataUrl) {
-                // If it's already a URL or empty? Unlikely given FileUtils.
                 thumbnailUrl = dataUrl;
             }
 
             newItemCandidate = {
                 id: uuidv4(),
-                type: type, // Should always be 'image' now
+                type: 'file', // Explicitly 'file'
                 content: fileName,
                 preview: thumbnailUrl,
                 timestamp: Date.now(),
                 pinned: false,
-                metadata: { originalPath: detectedFilePath }
-            };
-            originalPreviewData = dataUrl; // Use dataUrl for duplicate checking signature
-
-            console.log(`[ClipboardService] File Detected: ${fileName} -> ${thumbnailUrl}`);
-        }
-
-        // 2. IMAGE HANDLER (Non-file images, e.g. web screenshots)
-        if (!newItemCandidate) {
-            if (formats.some(f => f.startsWith('image/'))) {
-                const image = clipboard.readImage();
-                if (!image.isEmpty()) {
-                    const dataUrl = image.resize({ height: 600 }).toDataURL();
-
-                    const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, "");
-                    const buffer = Buffer.from(base64Data, 'base64');
-                    const filename = await this.imageStorage.saveThumbnail(buffer);
-                    const thumbnailUrl = this.imageStorage.getThumbnailUrl(filename);
-
-                    newItemCandidate = {
-                        id: uuidv4(),
-                        type: 'image',
-                        content: 'Image content placeholder',
-                        preview: thumbnailUrl,
-                        timestamp: Date.now(),
-                        pinned: false
-                    };
-                    originalPreviewData = dataUrl;
+                metadata: {
+                    originalPath: detectedFilePath,
+                    hash: contentHash
                 }
-            }
+            };
         }
 
-        // 3. TEXT HANDLER
-        if (!newItemCandidate) {
-            const text = clipboard.readText();
-            if (text && text.trim().length > 0) {
+        // 2. IMAGE HANDLER (Non-file images)
+        if (!newItemCandidate && formats.some(f => f.startsWith('image/'))) {
+            const image = clipboard.readImage();
+            if (!image.isEmpty()) {
+                const dataUrl = image.resize({ height: 600 }).toDataURL();
+                // For images, we hash the base64 data
+                contentHash = this.generateHash(dataUrl, 'image');
+
+                if (contentHash === this.lastClipboardHash) return;
+
+                const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, "");
+                const buffer = Buffer.from(base64Data, 'base64');
+                const filename = await this.imageStorage.saveThumbnail(buffer);
+                const thumbnailUrl = this.imageStorage.getThumbnailUrl(filename);
+
                 newItemCandidate = {
                     id: uuidv4(),
-                    type: 'text',
-                    content: text,
+                    type: 'image',
+                    content: 'Image',
+                    preview: thumbnailUrl,
                     timestamp: Date.now(),
-                    pinned: false
+                    pinned: false,
+                    metadata: { hash: contentHash }
                 };
             }
         }
 
-        // 4. DE-DUPLICATION & SAVE
-        if (newItemCandidate) {
-            // Robust Signature Calculation
-            let signature = '';
+        // 3. TEXT/HTML HANDLER
+        if (!newItemCandidate) {
+            const text = clipboard.readText();
+            const html = clipboard.readHTML();
 
-            if (newItemCandidate.metadata && newItemCandidate.metadata.originalPath) {
-                // If it came from a file, the path IS the signature.
-                signature = `file:${newItemCandidate.metadata.originalPath}`;
-            } else {
-                // For other content, use type + content + preview length
-                const signaturePreview = originalPreviewData || newItemCandidate.preview || '';
-                const contentSig = newItemCandidate.content.substring(0, 50);
-                signature = `${newItemCandidate.type}:${newItemCandidate.content.length}:${contentSig}:${signaturePreview.length}`;
+            if (text && text.trim().length > 0) {
+                contentHash = this.generateHash(text, 'text');
+
+                if (contentHash === this.lastClipboardHash) return;
+
+                const isCode = this.detectCode(text);
+
+                newItemCandidate = {
+                    id: uuidv4(),
+                    type: html ? 'html' : 'text',
+                    content: text,
+                    timestamp: Date.now(),
+                    pinned: false,
+                    metadata: {
+                        hash: contentHash,
+                        htmlContent: html || undefined,
+                        isCode: isCode
+                    }
+                };
             }
+        }
 
-            // Check against last captured signature (Fast check)
-            // console.log(`[ClipboardService] Sig Check: '${signature}' vs '${this.lastClipboardContent}'`);
-            if (signature === this.lastClipboardContent) {
-                return;
-            } else {
-                console.log(`[ClipboardService] New Signature Detected: '${signature}' (Old: '${this.lastClipboardContent}')`);
-            }
-
-            // Check against history top item (Deep check)
-            const lastItem = history.length > 0 ? history[0] : null;
-
-            // For duplicate checking with history, we might need a smarter check since previews are now URLs
-            // But usually, if content matches and type matches, it's a duplicate for text/files.
-            // For images, it's harder. Let's rely on our local `lastClipboardContent` for the immediate loop.
-
-            this.saveItem(newItemCandidate);
-            this.lastClipboardContent = signature;
-            console.log(`[ClipboardService] Updated Last Content: '${this.lastClipboardContent}'`);
-            console.log('[ClipboardService] New Item Saved:', newItemCandidate.type);
+        // 4. SAVE & DEDUPLICATE
+        if (newItemCandidate && contentHash) {
+            this.handleNewItem(newItemCandidate, contentHash);
+            this.lastClipboardHash = contentHash;
         }
     }
 
-    private saveItem(newItem: ClipboardItem) {
+    private detectCode(text: string): boolean {
+        // Simple heuristic for code detection
+        const codePatterns = [
+            /^(const|let|var|function|class|import|export|if|for|while|return)\s/gm,
+            /[\{\}\[\]\(\);]/g,
+            /^\s{2,}/gm
+        ];
+
+        let score = 0;
+        if (codePatterns[0].test(text)) score += 2;
+        if ((text.match(codePatterns[1]) || []).length > 3) score += 1;
+        if (codePatterns[2].test(text)) score += 1;
+
+        return score >= 2;
+    }
+
+    private handleNewItem(newItem: ClipboardItem, hash: string) {
         const history = this.store.get('history', []);
-        const newHistory = [newItem, ...history].slice(0, 100);
+
+        // Check for existing item with same hash
+        const existingIndex = history.findIndex(item => item.metadata?.hash === hash || item.content === newItem.content);
+
+        let newHistory: ClipboardItem[];
+
+        if (existingIndex !== -1) {
+            // DUPLICATE FOUND: Move to top, update timestamp
+            const existingItem = history[existingIndex];
+
+            // If pinned, just update timestamp but keep pinned status
+            // If not pinned, it effectively becomes the "newest" item
+            const updatedItem = {
+                ...existingItem,
+                timestamp: Date.now(),
+                // Update preview if it was missing/broken? maybe not for now.
+            };
+
+            // Remove old instance
+            history.splice(existingIndex, 1);
+            // Add to top
+            newHistory = [updatedItem, ...history];
+            console.log(`[ClipboardService] Duplicate detected. Bumped item ${existingItem.id} to top.`);
+        } else {
+            // NEW ITEM
+            newHistory = [newItem, ...history];
+            console.log(`[ClipboardService] New item captured: ${newItem.type}`);
+        }
+
+        // ENFORCE LIMITS
+        newHistory = this.enforceHistoryLimit(newHistory);
+
         this.store.set('history', newHistory);
 
         if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-            this.mainWindow.webContents.send('clipboard-changed', newItem);
+            this.mainWindow.webContents.send('clipboard-updated', newHistory);
+        }
+    }
+
+    private enforceHistoryLimit(history: ClipboardItem[]): ClipboardItem[] {
+        if (history.length <= ClipboardService.MAX_HISTORY_SIZE) {
+            return history;
+        }
+
+        // We need to remove items.
+        // Strategy: Keep all pinned items. Remove unpinned items starting from the oldest.
+        // If we have > MAX_HISTORY_SIZE pinned items, we have to keep them all (user intent wins).
+
+        const pinnedItems = history.filter(item => item.pinned);
+        const unpinnedItems = history.filter(item => !item.pinned);
+
+        if (pinnedItems.length >= ClipboardService.MAX_HISTORY_SIZE) {
+            // Edge case: User pinned more than the limit. We keep all pinned + maybe a few unpinned if we want?
+            // Spec says "Set default max history size of 200 items (excluding pinned items)"
+            // -> "When limit is exceeded, remove the oldest non-pinned items first"
+
+            // Let's interpret "excluding pinned items" as "Pinned items don't count towards the recycling limit" 
+            // OR "We can go above 200 if they are pinned".
+            // Let's go with: Keep all pinned. Trim unpinned to (MAX - pinned.length) or 0.
+
+            // Actually, usually "LIMIT" implies total size shown. 
+            // "excluding pinned items" in the prompt request likely means "200 items PLUS pinned items" or "200 non-pinned items".
+            // Let's stick to a safe interpretation: Total list size target is 200. Pinned items are protected.
+
+            // Wait, "Set a default maximum history size of 200 items (excluding pinned items)" -> This effectively means we can have 200 unpinned items + N pinned items.
+
+            const maxUnpinned = ClipboardService.MAX_HISTORY_SIZE;
+            const trimmedUnpinned = unpinnedItems.slice(0, maxUnpinned); // Keep newest 200 unpinned
+
+            // Re-merge. We need to maintain order? 
+            // The `history` array is sorted by "most recent" (index 0). 
+            // We should filter the original list to respect order.
+
+            const allowedIds = new Set([
+                ...pinnedItems.map(i => i.id),
+                ...trimmedUnpinned.map(i => i.id)
+            ]);
+
+            return history.filter(item => allowedIds.has(item.id));
+        } else {
+            // Normal case: We have space for some unpinned items.
+            // But if the spec says "200 items (excluding pinned items)", it implies the limit applies ONLY to the unpinned count.
+            // So we can always keep 200 unpinned items.
+
+            const maxUnpinned = ClipboardService.MAX_HISTORY_SIZE;
+            const trimmedUnpinned = unpinnedItems.slice(0, maxUnpinned);
+
+            const allowedIds = new Set([
+                ...pinnedItems.map(i => i.id),
+                ...trimmedUnpinned.map(i => i.id)
+            ]);
+
+            return history.filter(item => allowedIds.has(item.id));
         }
     }
 }
