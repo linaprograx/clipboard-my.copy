@@ -139,28 +139,45 @@ export class ClipboardService {
 
         // 2. IMAGE HANDLER (Non-file images)
         if (!newItemCandidate && formats.some(f => f.startsWith('image/'))) {
-            const image = clipboard.readImage();
-            if (!image.isEmpty()) {
-                const dataUrl = image.resize({ height: 600 }).toDataURL();
-                // For images, we hash the base64 data
-                contentHash = this.generateHash(dataUrl, 'image');
+            try {
+                const image = clipboard.readImage();
+                if (!image.isEmpty()) {
+                    // Resize for storage optimization (max 600px height/width implies a reasonable thumbnail)
+                    // We treat this as the "preview" for the card.
+                    const resizedImage = image.resize({ height: 600 });
 
-                if (contentHash === this.lastClipboardHash) return;
+                    // Use PNG buffer directly for storage (faster than DataURL -> Buffer)
+                    const pngBuffer = resizedImage.toPNG();
 
-                const base64Data = dataUrl.replace(/^data:image\/\w+;base64,/, "");
-                const buffer = Buffer.from(base64Data, 'base64');
-                const filename = await this.imageStorage.saveThumbnail(buffer);
-                const thumbnailUrl = this.imageStorage.getThumbnailUrl(filename);
+                    // Hash the buffer for deduplication
+                    contentHash = this.generateHash(pngBuffer.toString('base64'), 'image');
 
-                newItemCandidate = {
-                    id: uuidv4(),
-                    type: 'image',
-                    content: 'Image',
-                    preview: thumbnailUrl,
-                    timestamp: Date.now(),
-                    pinned: false,
-                    metadata: { hash: contentHash }
-                };
+                    if (contentHash === this.lastClipboardHash) return;
+
+                    // Save to disk
+                    const filename = await this.imageStorage.saveThumbnail(pngBuffer);
+                    const thumbnailUrl = this.imageStorage.getThumbnailUrl(filename);
+
+                    // dimensions for metadata
+                    const size = resizedImage.getSize();
+
+                    newItemCandidate = {
+                        id: uuidv4(),
+                        type: 'image',
+                        content: 'Image', // Default text
+                        preview: thumbnailUrl,
+                        timestamp: Date.now(),
+                        pinned: false,
+                        metadata: {
+                            hash: contentHash,
+                            width: size.width,
+                            height: size.height
+                        }
+                    };
+                    console.log(`[ClipboardService] Captured Image: ${size.width}x${size.height} -> ${filename}`);
+                }
+            } catch (err) {
+                console.error('[ClipboardService] Failed to process image:', err);
             }
         }
 

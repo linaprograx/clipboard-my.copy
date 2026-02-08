@@ -4,7 +4,7 @@ import { Lock, Copy, Edit2, Trash2, Link } from 'lucide-react';
 
 interface ClipboardItem {
     id: string;
-    type: 'text' | 'image' | 'rtf' | 'html';
+    type: 'text' | 'image' | 'rtf' | 'html' | 'file';
     content: string;
     preview?: string;
     timestamp: number;
@@ -15,7 +15,9 @@ interface ClipboardItem {
             image?: string;
             description?: string;
             url?: string;
-        }
+        };
+        width?: number;
+        height?: number;
     };
 }
 
@@ -41,9 +43,9 @@ export function ClipboardCard({ item, isActive, onClick, onEdit }: ClipboardCard
             icon: <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center"><span className="font-bold text-white text-lg">P</span></div>
         };
         if (item.type === 'image') return {
-            bg: 'bg-[#fb923c]', // Orange (matches screenshot 'Buscar'/'Mantener' style)
+            bg: 'bg-[#fb923c]', // Orange 
             text: 'text-white',
-            name: 'Imágen',
+            name: item.metadata?.width ? `IMG ${item.metadata.width}x${item.metadata.height}` : 'Imágen',
             icon: <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center"><span className="font-bold text-white text-lg">I</span></div>
         };
         if (item.metadata?.openGraphValues?.title) return {
@@ -142,23 +144,31 @@ export function ClipboardCard({ item, isActive, onClick, onEdit }: ClipboardCard
             <div className="flex-1 p-3 flex flex-col relative bg-[#1e1e1e]">
                 {/* Content Text or Image */}
                 <div className="flex-1 overflow-hidden mask-linear-fade relative w-full h-full">
-                    {item.type === 'image' && item.preview ? (
-                        <img
-                            src={item.preview}
-                            alt="Clipboard Preview"
-                            className="w-full h-full object-cover rounded-md opacity-90 hover:opacity-100 transition-opacity"
-                            onError={(e) => {
-                                console.error('Image Load Error:', item.preview, e);
-                                e.currentTarget.style.display = 'none'; // Hide broken image
-                                e.currentTarget.parentElement?.classList.add('bg-red-500/20'); // Visual indicator
-                            }}
-                        />
+                    {item.type === 'image' || (item.preview && item.type !== 'file') ? (
+                        <div className="w-full h-full relative bg-neutral-900 flex items-center justify-center">
+                            {item.preview ? (
+                                <img
+                                    src={item.preview}
+                                    alt="Clipboard Preview"
+                                    className="w-full h-full object-cover rounded-md opacity-90 hover:opacity-100 transition-opacity"
+                                    onError={(e) => {
+                                        console.error('Image Load Error:', item.preview);
+                                        e.currentTarget.style.display = 'none';
+                                        e.currentTarget.parentElement?.classList.add('bg-amber-500/10');
+                                    }}
+                                />
+                            ) : null}
+
+                            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-0 opacity-50">
+                                <span className="text-white/20 font-bold text-xs uppercase tracking-widest">IMG</span>
+                            </div>
+                        </div>
                     ) : item.metadata?.openGraphValues?.title ? (
                         <div className="flex flex-col h-full">
-                            {item.metadata.openGraphValues.image ? (
+                            {item.metadata?.openGraphValues?.image ? (
                                 <div className="h-2/3 w-full relative overflow-hidden rounded-md mb-2">
                                     <img
-                                        src={item.metadata.openGraphValues.image}
+                                        src={item.metadata?.openGraphValues?.image}
                                         className="object-cover w-full h-full opacity-80"
                                         alt="Link Preview"
                                     />
@@ -166,16 +176,16 @@ export function ClipboardCard({ item, isActive, onClick, onEdit }: ClipboardCard
                             ) : null}
                             <div className="flex flex-col">
                                 <span className="text-white font-bold text-[11px] leading-tight line-clamp-2">
-                                    {item.metadata.openGraphValues.title}
+                                    {item.metadata?.openGraphValues?.title}
                                 </span>
                                 <span className="text-white/50 text-[9px] mt-1 truncate">
-                                    {item.metadata.openGraphValues.url || item.content}
+                                    {item.metadata?.openGraphValues?.url || item.content}
                                 </span>
                             </div>
                         </div>
                     ) : item.content.trim().length > 0 ? (
                         <p className={cn(
-                            "text-[10px] leading-[1.4] break-words whitespace-pre-wrap select-none", // Prevent text selection on card click
+                            "text-[10px] leading-[1.4] break-words whitespace-pre-wrap select-none",
                             item.pinned ? "text-white font-medium" : "text-gray-400 font-mono"
                         )}>
                             {item.content.substring(0, 100)}

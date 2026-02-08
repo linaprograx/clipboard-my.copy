@@ -9,6 +9,8 @@ export interface ClipboardItemMetadata {
         description?: string;
         url?: string;
     };
+    width?: number;
+    height?: number;
 }
 
 export interface ClipboardItem {
