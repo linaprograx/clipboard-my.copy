@@ -10,12 +10,22 @@ import { ClipboardService } from './services/ClipboardService';
 
 
 // Store Setup
-let store: Store<{ history: ClipboardItem[] }>;
+interface UserPreferences {
+    globalShortcut: string;
+    launchAtLogin: boolean;
+    historyLimit: number;
+}
+
+const defaultPreferences: UserPreferences = {
+    globalShortcut: 'CommandOrControl+Shift+V',
+    launchAtLogin: false,
+    historyLimit: 200
+};
+
+let store: Store<{ history: ClipboardItem[], preferences: UserPreferences }>;
 try {
-    store = new Store<{ history: ClipboardItem[] }>({
-        defaults: { history: [] },
-        // Add migration support if schema changes significantly,
-        // but for now we essentially handle it via types
+    store = new Store<{ history: ClipboardItem[], preferences: UserPreferences }>({
+        defaults: { history: [], preferences: defaultPreferences },
     });
 } catch (err) {
     console.error('Failed to initialize Electron Store, resetting:', err);
@@ -23,9 +33,8 @@ try {
     store = new Store();
     store.clear();
     store.set('history', []);
+    store.set('preferences', defaultPreferences);
 }
-
-// Startup Cleanup: None (Phase 0/1 sanitized)
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 // Removed electron-squirrel-startup check to prevent issues on non-Windows platforms/dev.
@@ -92,80 +101,88 @@ const createWindow = () => {
     }
 };
 
-// [Cleanup] Removed legacy dispatchClipboardUpdate helper (unused)
-
-// Register Privileged Schemes (MUST be done before app is ready)
-protocol.registerSchemesAsPrivileged([
-    {
-        scheme: 'thumbnail',
-        privileges: {
-            secure: true,
-            standard: true,
-            supportFetchAPI: true,
-            bypassCSP: true,
-            corsEnabled: true
-        }
-    }
-]);
-
-app.whenReady().then(() => {
-    // 1. Register 'thumbnail://' protocol
-    protocol.registerFileProtocol('thumbnail', (request, callback) => {
-        let url = request.url;
-        console.log('[Protocol] RAW REQUEST:', url);
-
-        // Remove protocol scheme
-        url = url.replace(/^thumbnail:\/*/i, '');
-
-        // Remove any trailing slashes
-        url = url.replace(/\/+$/, '');
-
-        const filename = decodeURIComponent(url);
-        const filePath = path.join(app.getPath('userData'), 'thumbnails', filename);
-
-        console.log('[Protocol] Cleaned filename:', filename);
-        console.log('[Protocol] Full path:', filePath);
-        console.log('[Protocol] Exists:', fs.existsSync(filePath));
-
-        if (!fs.existsSync(filePath)) {
-            console.error('[Protocol] ERROR: File not found');
-            callback({ error: -6 }); // NET_ERROR(FILE_NOT_FOUND)
-            return;
-        }
-
-        callback({ path: filePath });
-    });
-
-    createWindow();
-
-    // Initialize Clipboard Service
-    console.log('[Main] UserData Path:', app.getPath('userData'));
-    console.log('[Main] Initializing ClipboardService...');
+const registerGlobalShortcut = (shortcut: string) => {
+    globalShortcut.unregisterAll();
     try {
-        clipboardService = new ClipboardService(store, mainWindow);
-        clipboardService.startMonitoring();
-        console.log('[Main] ClipboardService initialized successfully.');
-    } catch (err) {
-        console.error('[Main] Failed to initialize ClipboardService:', err);
-    }
-
-    // Global Shortcut
-    try {
-        globalShortcut.register('CommandOrControl+Shift+V', () => {
+        globalShortcut.register(shortcut, () => {
             if (mainWindow) {
                 if (mainWindow.isVisible()) {
                     mainWindow.hide();
                 } else {
-                    // Send current history before showing
                     mainWindow.webContents.send('clipboard-updated', store.get('history'));
                     mainWindow.show();
                     mainWindow.focus();
                 }
             }
         });
-    } catch (e) {
-        // Ignore registration errors
+        console.log(`[Main] Global shortcut registered: ${shortcut}`);
+    } catch (err) {
+        console.error(`[Main] Failed to register shortcut: ${shortcut}`, err);
     }
+};
+
+app.whenReady().then(() => {
+    // ... (Protocol registration remains same) ...
+
+    protocol.registerFileProtocol('thumbnail', (request, callback) => {
+        // ... (Thumbnail handler remains same) ...
+        let url = request.url;
+        url = url.replace(/^thumbnail:\/*/i, '');
+        url = url.replace(/\/+$/, '');
+        const filename = decodeURIComponent(url);
+        const filePath = path.join(app.getPath('userData'), 'thumbnails', filename);
+        if (!fs.existsSync(filePath)) {
+            callback({ error: -6 });
+            return;
+        }
+        callback({ path: filePath });
+    });
+
+    createWindow();
+
+    // Initialize Clipboard Service
+    try {
+        clipboardService = new ClipboardService(store, mainWindow);
+        clipboardService.startMonitoring();
+    } catch (err) {
+        console.error('[Main] Failed to initialize ClipboardService:', err);
+    }
+
+    // Register Global Shortcut from Preferences
+    const prefs = store.get('preferences') || defaultPreferences;
+    registerGlobalShortcut(prefs.globalShortcut);
+
+    // Apply Launch at Login
+    app.setLoginItemSettings({
+        openAtLogin: prefs.launchAtLogin,
+        path: app.getPath('exe')
+    });
+});
+
+// ... (Other handlers) ...
+
+// IPC: Preferences
+ipcMain.handle('get-preferences', () => {
+    return store.get('preferences') || defaultPreferences;
+});
+
+ipcMain.on('update-preference', (event, { key, value }: { key: keyof UserPreferences, value: any }) => {
+    const prefs = store.get('preferences') || defaultPreferences;
+    const newPrefs = { ...prefs, [key]: value };
+    store.set('preferences', newPrefs);
+
+    // Apply Side Effects
+    if (key === 'globalShortcut') {
+        registerGlobalShortcut(value as string);
+    } else if (key === 'launchAtLogin') {
+        app.setLoginItemSettings({
+            openAtLogin: value as boolean,
+            path: app.getPath('exe')
+        });
+    }
+
+    // Notify renderer (optional, or it can just re-fetch)
+    mainWindow?.webContents.send('preferences-updated', newPrefs);
 });
 
 

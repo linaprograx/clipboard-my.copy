@@ -20,4 +20,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     deleteItem: (id: string) => ipcRenderer.send('delete-item', id),
     clearHistory: () => ipcRenderer.send('clear-history'),
     updateItemContent: (id: string, content: string) => ipcRenderer.send('update-item-content', { id, content }),
+
+    // Preferences
+    getPreferences: () => ipcRenderer.invoke('get-preferences'),
+    updatePreference: (key: string, value: any) => ipcRenderer.send('update-preference', { key, value }),
+    onPreferencesUpdated: (callback: (prefs: any) => void) => {
+        const subscription = (_event: IpcRendererEvent, value: any) => callback(value);
+        ipcRenderer.on('preferences-updated', subscription);
+        return () => ipcRenderer.removeListener('preferences-updated', subscription);
+    }
 });

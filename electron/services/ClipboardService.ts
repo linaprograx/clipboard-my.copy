@@ -9,7 +9,7 @@ import { LinkPreviewService } from './LinkPreviewService';
 import path from 'path';
 
 export class ClipboardService {
-    private store: Store<{ history: ClipboardItem[] }>;
+    private store: Store<any>;
     private mainWindow: BrowserWindow | null;
     private imageStorage: ImageStorageService;
     private lastClipboardHash: string = '';
@@ -18,7 +18,7 @@ export class ClipboardService {
     private POLL_INTERVAL = 1000;
     private static MAX_HISTORY_SIZE = 200;
 
-    constructor(store: Store<{ history: ClipboardItem[] }>, mainWindow: BrowserWindow | null) {
+    constructor(store: Store<any>, mainWindow: BrowserWindow | null) {
         this.store = store;
         this.mainWindow = mainWindow;
         this.imageStorage = new ImageStorageService();
@@ -26,7 +26,7 @@ export class ClipboardService {
     }
 
     private migrateLegacyItems() {
-        const history = this.store.get('history', []);
+        const history = this.store.get('history', []) as ClipboardItem[];
         let changed = false;
 
         const migrated = history.map(item => {
@@ -238,7 +238,7 @@ export class ClipboardService {
             if (metadata.openGraphValues?.title || metadata.openGraphValues?.image) {
 
                 // Update the item in the store
-                const history = this.store.get('history', []);
+                const history = this.store.get('history', []) as ClipboardItem[];
                 const index = history.findIndex(i => i.id === item.id);
 
                 if (index !== -1) {
@@ -278,7 +278,7 @@ export class ClipboardService {
     }
 
     private handleNewItem(newItem: ClipboardItem, hash: string) {
-        const history = this.store.get('history', []);
+        const history = this.store.get('history', []) as ClipboardItem[];
 
         // Check for existing item with same hash
         const existingIndex = history.findIndex(item => item.metadata?.hash === hash || item.content === newItem.content);
