@@ -47,30 +47,102 @@ const getTimeAgo = (timestamp: number) => {
     return `${Math.floor(hours / 24)}d`;
 };
 
+// --- Theme Logic ---
+
+const getItemTheme = (item: ClipboardItem) => {
+    // 1. Pinned (Overrides everything else with Gold)
+    if (item.pinned) return {
+        border: "border-amber-500/20",
+        activeBorder: "border-amber-400",
+        shadow: "shadow-[0_0_30px_rgba(251,191,36,0.15)]",
+        iconColor: "text-amber-400",
+        badgeBg: "bg-amber-500/10",
+        label: "Fijado",
+        gradient: "from-amber-500/5 to-transparent"
+    };
+
+    // 2. Type-based Themes
+    switch (item.type) {
+        case 'image': return {
+            border: "border-indigo-500/20",
+            activeBorder: "border-indigo-400",
+            shadow: "shadow-[0_0_30px_rgba(129,140,248,0.2)]",
+            iconColor: "text-indigo-400",
+            badgeBg: "bg-indigo-500/10",
+            label: "Imagen",
+            gradient: "from-indigo-500/5 to-transparent"
+        };
+        case 'file': return {
+            border: "border-orange-500/20",
+            activeBorder: "border-orange-400",
+            shadow: "shadow-[0_0_30px_rgba(251,146,60,0.15)]",
+            iconColor: "text-orange-400",
+            badgeBg: "bg-orange-500/10",
+            label: "Archivo",
+            gradient: "from-orange-500/5 to-transparent"
+        };
+        case 'text':
+            if (item.metadata?.openGraphValues?.title) return { // Link
+                border: "border-emerald-500/20",
+                activeBorder: "border-emerald-400",
+                shadow: "shadow-[0_0_30px_rgba(52,211,153,0.15)]",
+                iconColor: "text-emerald-400",
+                badgeBg: "bg-emerald-500/10",
+                label: "Enlace",
+                gradient: "from-emerald-500/5 to-transparent"
+            };
+            // Default Text
+            return {
+                border: "border-white/5", // Very neutral for text
+                activeBorder: "border-white/40",
+                shadow: "shadow-[0_0_20px_rgba(255,255,255,0.05)]",
+                iconColor: "text-slate-400",
+                badgeBg: "bg-white/5",
+                label: "Texto",
+                gradient: "from-white/0 to-transparent" // No gradient for text to keep it super clean
+            };
+        default: return {
+            border: "border-white/5",
+            activeBorder: "border-white/40",
+            shadow: "shadow-[0_0_20px_rgba(255,255,255,0.05)]",
+            iconColor: "text-slate-400",
+            badgeBg: "bg-white/5",
+            label: "Desconocido",
+            gradient: "from-white/0 to-transparent"
+        };
+    }
+};
+
 // --- Sub-Components ---
 
 // 1. Card Shell: Handles the container, border, shadow, animations
-const CardShell = ({ children, isActive, isPinned, onClick }: { children: React.ReactNode, isActive: boolean, isPinned: boolean, onClick: () => void }) => (
+const CardShell = ({ children, isActive, theme, onClick }: { children: React.ReactNode, isActive: boolean, theme: ReturnType<typeof getItemTheme>, onClick: () => void }) => (
     <div
         onClick={onClick}
         className={cn(
             "group relative flex flex-col w-full h-full rounded-[20px] overflow-hidden cursor-pointer transition-all duration-300",
             // Base styles
             "bg-[#1c1c1e] border",
+            theme.border,
             // Active State
             isActive
-                ? "border-amber-400/50 shadow-[0_0_30px_rgba(251,191,36,0.15)] scale-[1.02] z-10"
-                : "border-white/5 hover:border-white/10 hover:bg-[#252527] hover:scale-[1.01]",
-            // Pinned State (Subtle ring if not active)
-            isPinned && !isActive ? "ring-1 ring-amber-500/20" : ""
+                ? cn(theme.activeBorder, theme.shadow, "scale-[1.02] z-10")
+                : "hover:border-white/10 hover:bg-[#252527] hover:scale-[1.01]"
         )}
     >
-        {children}
+        {/* Subtle Gradient Hint */}
+        {isActive && <div className={cn("absolute inset-0 bg-gradient-to-br pointer-events-none opacity-100", theme.gradient)} />}
+        {!isActive && <div className={cn("absolute inset-0 bg-gradient-to-br pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500", theme.gradient)} />}
+
+        {/* Content Container (z-index to sit above gradient) */}
+        <div className="relative z-10 flex flex-col w-full h-full">
+            {children}
+        </div>
     </div>
 );
 
 // 2. Card Header: Icon, Type Label, Actions
-const CardHeader = ({ item, onEdit }: { item: ClipboardItem, onEdit: (id: string, c: string) => void }) => {
+const CardHeader = ({ item, theme, onEdit }: { item: ClipboardItem, theme: ReturnType<typeof getItemTheme>, onEdit: (id: string, c: string) => void }) => {
     const handleDelete = (e: React.MouseEvent) => {
         e.stopPropagation();
         if (confirm("¿Borrar elemento?")) window.electronAPI?.deleteItem(item.id);
@@ -81,66 +153,41 @@ const CardHeader = ({ item, onEdit }: { item: ClipboardItem, onEdit: (id: string
         window.electronAPI?.togglePin(item.id);
     };
 
-
-
     const handleEditClick = (e: React.MouseEvent) => {
         e.stopPropagation();
         onEdit(item.id, item.content);
     };
 
-    // Determine Icon & Label
+    // Icon logic
     let Icon = FileText;
-    let label = "Texto";
-    let colorClass = "text-blue-400";
-    let bgClass = "bg-blue-500/10";
-
-    if (item.type === 'image') {
-        Icon = ImageIcon;
-        label = "Imagen";
-        colorClass = "text-purple-400";
-        bgClass = "bg-purple-500/10";
-    } else if (item.metadata?.openGraphValues?.title) {
-        Icon = Link;
-        label = "Enlace";
-        colorClass = "text-orange-400";
-        bgClass = "bg-orange-500/10";
-    } else if (item.type === 'file') {
-        Icon = FileText; // Or a FileIcon if we had one specific
-        label = "Archivo";
-        colorClass = "text-emerald-400";
-        bgClass = "bg-emerald-500/10";
-    }
-
-    if (item.pinned) {
-        colorClass = "text-amber-400";
-        bgClass = "bg-amber-500/10";
-    }
+    if (item.type === 'image') Icon = ImageIcon;
+    else if (item.metadata?.openGraphValues?.title) Icon = Link;
+    else if (item.type === 'file') Icon = FileText;
 
     return (
         <div className="flex items-center justify-between px-3 py-2.5 shrink-0 border-b border-white/5 bg-black/20">
             {/* Left: Icon & Label */}
             <div className="flex items-center gap-2">
-                <div className={cn("w-6 h-6 rounded-md flex items-center justify-center", bgClass)}>
-                    <Icon size={12} className={colorClass} />
+                <div className={cn("w-6 h-6 rounded-md flex items-center justify-center transition-colors", theme.badgeBg)}>
+                    <Icon size={12} className={theme.iconColor} />
                 </div>
-                <span className={cn("text-[10px] font-bold tracking-wide uppercase opacity-70", colorClass)}>
-                    {item.pinned ? "Fijado" : label}
+                <span className={cn("text-[10px] font-bold tracking-wide uppercase opacity-70 transition-colors", theme.iconColor)}>
+                    {theme.label}
                 </span>
             </div>
 
             {/* Right: Actions (Visible on Hover/Active) */}
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={handlePin} className={cn("p-1 rounded hover:bg-white/10", item.pinned ? "text-amber-400" : "text-white/40")}>
+                <button onClick={handlePin} className={cn("p-1 rounded hover:bg-white/10 transition-colors", item.pinned ? "text-amber-400" : "text-white/40 hover:text-white")}>
                     <Lock size={12} fill={item.pinned ? "currentColor" : "none"} />
                 </button>
-                <button onClick={handleEditClick} className="p-1 rounded hover:bg-white/10 text-white/40 hover:text-white">
+                <button onClick={handleEditClick} className="p-1 rounded hover:bg-white/10 text-white/40 hover:text-white transition-colors">
                     <Edit2 size={12} />
                 </button>
-                <button onClick={handleDelete} className="p-1 rounded hover:bg-red-500/20 text-white/40 hover:text-red-400">
+                <button onClick={handleDelete} className="p-1 rounded hover:bg-red-500/20 text-white/40 hover:text-red-400 transition-colors">
                     <Trash2 size={12} />
                 </button>
             </div>
-            {/* Always visible copy/options trigger if needed, or just timestamp? */}
         </div>
     );
 };
@@ -262,9 +309,11 @@ export function ClipboardCard({ item, isActive, onClick, onEdit }: ClipboardCard
         Content = FileCard;
     }
 
+    const theme = getItemTheme(item);
+
     return (
-        <CardShell isActive={isActive} isPinned={item.pinned} onClick={onClick}>
-            {item.type !== 'image' && <CardHeader item={item} onEdit={onEdit} />}
+        <CardShell isActive={isActive} theme={theme} onClick={onClick}>
+            {item.type !== 'image' && <CardHeader item={item} theme={theme} onEdit={onEdit} />}
             {/* Images get full bleed, no header? Or maybe overlay header? 
                  Let's keep standard header for consistency for now, or maybe make it overlay for images?
                  Plan said "Full-bleed or maximized thumbnail". 
