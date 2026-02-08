@@ -1,15 +1,10 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, screen, clipboard } from 'electron';
 import { exec } from 'child_process';
 import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 import Store from 'electron-store';
 import { v4 as uuidv4 } from 'uuid';
+import { ClipboardItem } from './types';
 
-import { ClipboardItem } from './types.js';
 
 // Store Setup
 const store = new Store<{ history: ClipboardItem[] }>({
@@ -52,6 +47,7 @@ const createWindow = () => {
             preload: path.join(__dirname, 'preload.js'),
             nodeIntegration: false,
             contextIsolation: true,
+            sandbox: false, // Allow ESM preload?
         },
     });
 
@@ -78,7 +74,7 @@ const createWindow = () => {
 
     if (process.env.VITE_DEV_SERVER_URL) {
         mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-        // mainWindow.webContents.openDevTools({ mode: 'detach' }); 
+        mainWindow.webContents.openDevTools({ mode: 'detach' });
     } else {
         mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
     }
@@ -87,40 +83,36 @@ const createWindow = () => {
     // mainWindow.on('blur', () => mainWindow?.hide());
 };
 
-const addToHistory = (text: string, format: 'text' | 'html' = 'text') => {
-    const history = store.get('history');
+// ... (existing code) ...
 
-    // Avoid exact duplicates at the top
-    if (history.length > 0 && history[0].content === text) return;
+// ... (existing code) ...
 
-    const newItem: ClipboardItem = {
-        id: uuidv4(),
-        type: format,
-        content: text,
-        timestamp: Date.now(),
-        pinned: false,
-    };
+// Helper to update store and notify renderer
+const dispatchClipboardUpdate = (newItem: ClipboardItem) => {
+    console.log("Dispatching update for item:", newItem.id);
+    const history = store.get('history', []);
 
-    // Add to top, limit to 200
-    // Keep pinned items at the top? Or just sort them in UI? 
-    // Plan: Add new item to index 0. UI handles sorting (pinned first).
+    // Avoid exact duplicate at the top
+    if (history.length > 0) {
+        const top = history[0];
+        if (top.type === newItem.type && (top.content === newItem.content || top.preview === newItem.preview)) {
+            console.log("Duplicate detected. Backend has it, but UI might not. Forcing sync.");
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('clipboard-updated', history);
+            }
+            return;
+        }
+    }
 
-    const newHistory = [newItem, ...history].slice(0, 200);
+    const newHistory = [newItem, ...history].slice(0, 100);
     store.set('history', newHistory);
 
-    // Send to renderer if window exists
-    if (mainWindow) {
-        mainWindow.webContents.send('clipboard-updated', newHistory);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        console.log("Sending 'clipboard-changed' to renderer...");
+        mainWindow.webContents.send('clipboard-changed', newItem);
+    } else {
+        console.error("MainWindow is missing or destroyed, cannot send IPC.");
     }
-};
-
-const checkClipboard = () => {
-    const text = clipboard.readText();
-    if (text && text !== lastClipboardContent) {
-        lastClipboardContent = text;
-        addToHistory(text, 'text');
-    }
-    // Future: Handle images, HTML
 };
 
 app.whenReady().then(() => {
@@ -147,10 +139,14 @@ app.whenReady().then(() => {
 });
 
 // Clipboard polling
+// Clipboard polling (500ms for responsiveness)
 setInterval(() => {
     try {
+        // 1. Check Text
         const text = clipboard.readText();
+        // console.log("Checking clipboard:", text.substring(0, 20)); // Verbose logging
         if (text && text !== lastClipboardContent && text.trim().length > 0) {
+            console.log("New text detected:", text.substring(0, 20));
             lastClipboardContent = text;
             const newItem: ClipboardItem = {
                 id: uuidv4(),
@@ -159,24 +155,41 @@ setInterval(() => {
                 timestamp: Date.now(),
                 pinned: false
             };
+            dispatchClipboardUpdate(newItem);
+        }
 
-            // Add to store
-            const history = store.get('history', []);
-            // Avoid dupes at top
-            if (history.length === 0 || history[0].content !== text) {
-                const newHistory = [newItem, ...history].slice(0, 100);
-                store.set('history', newHistory);
-
-                // Send to Renderer
-                if (mainWindow && !mainWindow.isDestroyed()) {
-                    mainWindow.webContents.send('clipboard-changed', newItem);
+        // 2. Check Image (Basic check: if image is diff from last)
+        // Note: Reading images is expensive, so we optimized by checking available formats first
+        const formats = clipboard.availableFormats();
+        if (formats.includes('image/png') || formats.includes('image/jpeg')) {
+            const image = clipboard.readImage();
+            if (!image.isEmpty()) {
+                const dataUrl = image.toDataURL();
+                // Simple diff: length check or store hash. For now, check if different from last content (if it was an image)
+                // This is a naive check. A better way is to store the last 'sequenceNumber' if Electron supported it, 
+                // or just compare dataUrl length/content if it's not too huge.
+                // Let's rely on strict equality for now, but to avoid loop, we need to store it.
+                if (dataUrl !== lastClipboardContent) {
+                    lastClipboardContent = dataUrl;
+                    const newItem: ClipboardItem = {
+                        id: uuidv4(),
+                        type: 'image',
+                        content: 'Image content placeholder', // UI uses this for text preview
+                        preview: dataUrl, // Actual image data
+                        timestamp: Date.now(),
+                        pinned: false
+                    };
+                    dispatchClipboardUpdate(newItem);
                 }
             }
         }
+
     } catch (e) {
         console.error("Clipboard poll error", e);
     }
-}, 1000); // 1 second poll
+}, 500);
+
+
 
 app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -186,7 +199,9 @@ app.on('activate', () => {
 
 // IPC Handlers
 ipcMain.handle('get-history', () => {
-    return store.get('history');
+    const history = store.get('history', []);
+    console.log("Renderer requested history. Count:", history.length);
+    return history;
 });
 
 ipcMain.on('hide-window', () => {
@@ -209,11 +224,35 @@ ipcMain.on('paste-item', (event, item: ClipboardItem) => {
     exec(script);
 });
 
-ipcMain.on('pin-item', (event, id: string) => {
+
+
+ipcMain.on('delete-item', (event, id: string) => {
     const history = store.get('history');
-    const index = history.findIndex(i => i.id === id);
+    const itemToDelete = history.find(item => item.id === id);
+
+    // If we are deleting the item currently in the clipboard memory, reset memory
+    // so it can be re-copied immediately if needed.
+    if (itemToDelete && itemToDelete.content === lastClipboardContent) {
+        lastClipboardContent = '';
+    }
+
+    const newHistory = history.filter(item => item.id !== id);
+    store.set('history', newHistory);
+    mainWindow?.webContents.send('clipboard-updated', newHistory);
+});
+
+ipcMain.on('clear-history', () => {
+    store.set('history', []);
+    lastClipboardContent = ''; // Important: Reset so we can re-copy same text
+    mainWindow?.webContents.send('clipboard-updated', []);
+});
+
+ipcMain.on('update-item-content', (event, { id, content }: { id: string, content: string }) => {
+    const history = store.get('history');
+    const index = history.findIndex(item => item.id === id);
     if (index !== -1) {
-        history[index].pinned = !history[index].pinned;
+        history[index].content = content;
+        history[index].timestamp = Date.now(); // Update timestamp on edit? Maybe.
         store.set('history', history);
         mainWindow?.webContents.send('clipboard-updated', history);
     }

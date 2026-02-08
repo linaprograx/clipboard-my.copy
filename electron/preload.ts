@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
-import { ClipboardItem } from './types.js';
+import { ClipboardItem } from './types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
     hideWithoutPaste: () => ipcRenderer.send('hide-window'),
@@ -16,4 +16,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     pasteItem: (item: ClipboardItem) => ipcRenderer.send('paste-item', item),
     pinItem: (id: string) => ipcRenderer.send('pin-item', id),
+    deleteItem: (id: string) => ipcRenderer.send('delete-item', id),
+    clearHistory: () => ipcRenderer.send('clear-history'),
+    updateItemContent: (id: string, content: string) => ipcRenderer.send('update-item-content', { id, content }),
 });

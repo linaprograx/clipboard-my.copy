@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, Clock, Star, Copy, Image, Link } from 'lucide-react';
+import { Search, Clock, Star, Copy, Image, Link, Trash2 } from 'lucide-react';
 import { ClipboardCard } from './components/ClipboardCard';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -23,7 +23,6 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('all');
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const gridContainerRef = useRef<HTMLDivElement>(null);
 
   const cn = (...inputs: (string | undefined | null | false)[]) => twMerge(clsx(inputs));
 
@@ -31,14 +30,20 @@ export function App() {
   useEffect(() => {
     if (window.electronAPI) {
       // Initial Load (if store exists)
-      window.electronAPI.getHistory().then(setHistory);
+      // Initial Load (if store exists)
+      window.electronAPI.getHistory().then(h => {
+        console.log("Initial history loaded:", h);
+        setHistory(h);
+      });
 
       // Listen for updates
       const cleanup = window.electronAPI.onClipboardUpdate((newHistory: ClipboardItem[]) => {
+        console.log("Renderer received FULL UPDATE. Count:", newHistory.length);
         setHistory(newHistory);
       });
       // Also listen for single item polling updates if simpler
       window.electronAPI.onClipboardChanged((newItem: ClipboardItem) => {
+        console.log("Renderer received SINGLE ITEM:", newItem);
         setHistory(prev => {
           // Avoid dupes
           if (prev.find(p => p.id === newItem.id)) return prev;
@@ -48,19 +53,7 @@ export function App() {
 
       return cleanup;
     }
-
-    // Mock Data for Dev (if no Electron)
-    if (!window.electronAPI || history.length === 0) {
-      const mockItems: ClipboardItem[] = Array.from({ length: 12 }).map((_, i) => ({
-        id: String(i),
-        type: i % 4 === 0 ? 'image' : 'text',
-        content: i % 4 === 0 ? 'Image content placeholder' : `Contenido simulado del portapapeles ${i}... https://example.com`,
-        timestamp: Date.now() - i * 1000 * 60,
-        pinned: i === 1
-      }));
-      setHistory(prev => prev.length === 0 ? mockItems : prev);
-    }
-  }, []);
+  }, []); // Only run once on mount
 
   const filteredHistory = history.filter(item => {
     if (activeCategory === 'pinned' && !item.pinned) return false;
@@ -69,6 +62,8 @@ export function App() {
     if (activeCategory === 'links' && !item.content.startsWith('http')) return false;
     return item.content.toLowerCase().includes(searchQuery.toLowerCase());
   });
+
+  console.log(`Render: History ${history.length} -> Filtered ${filteredHistory.length}`);
 
   // Sort: Pinned first
   const sortedHistory = [...filteredHistory].sort((a, b) => (Number(b.pinned) - Number(a.pinned)) || (b.timestamp - a.timestamp));
@@ -86,6 +81,12 @@ export function App() {
         setSelectedIndex(prev => Math.min(prev + 4, sortedHistory.length - 1));
       } else if (e.key === 'ArrowUp') {
         setSelectedIndex(prev => Math.max(prev - 4, 0));
+      } else if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
+        // CMD+C: Copy selected item to clipboard (without pasting)
+        const item = sortedHistory[selectedIndex];
+        if (item) {
+          navigator.clipboard.writeText(item.content); // Simple web API for text
+        }
       } else if (e.key === 'Enter') {
         const item = sortedHistory[selectedIndex];
         if (item) window.electronAPI?.pasteItem(item);
@@ -114,15 +115,15 @@ export function App() {
 
           {/* Categories (Pill-shaped, centered look) */}
           <div className="flex-1 flex justify-start no-drag">
-            <div className="flex items-center gap-2 p-1 rounded-full bg-black/20 border border-white/5 backdrop-blur-md shadow-lg">
+            <div className="flex items-center gap-4 p-1.5 rounded-full bg-black/20 border border-white/5 backdrop-blur-md shadow-lg w-full max-w-2xl justify-between px-6">
               {categories.map(cat => (
                 <button
                   key={cat.id}
                   onClick={() => setActiveCategory(cat.id)}
                   className={cn(
-                    "flex items-center gap-2 px-4 py-1.5 rounded-full transition-all duration-300 text-[11px] font-semibold tracking-wide select-none",
+                    "flex flex-1 items-center justify-center gap-2 px-2 py-1.5 rounded-full transition-all duration-300 text-[11px] font-semibold tracking-wide select-none whitespace-nowrap",
                     activeCategory === cat.id
-                      ? "bg-white text-black shadow-[0_2px_10px_rgba(255,255,255,0.2)]"
+                      ? "bg-white text-black shadow-md scale-105"
                       : "text-white/60 hover:text-white hover:bg-white/10"
                   )}
                 >
@@ -131,10 +132,24 @@ export function App() {
                 </button>
               ))}
             </div>
+
+            {/* Clear All Button */}
+            <button
+              onClick={() => {
+                if (confirm('¿Borrar todo el historial?')) {
+                  window.electronAPI?.clearHistory();
+                }
+              }}
+              className="ml-4 p-2.5 rounded-full bg-white/5 hover:bg-red-500/20 hover:text-red-400 text-white/40 transition-all border border-transparent hover:border-red-500/30 backdrop-blur-md"
+              title="Borrar todo"
+            >
+              <Trash2 size={16} />
+            </button>
           </div>
 
           {/* Search (Minimalist glass) */}
-          <div className="relative w-56 group no-drag flex justify-end">
+          <div className="w-64 ml-8 group no-drag flex justify-end">
+
             <div className="relative w-full">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-white/80 transition-colors" size={14} />
               <input
@@ -165,7 +180,7 @@ export function App() {
             sortedHistory.map((item, index) => (
               <div
                 key={item.id}
-                className="h-[150px] w-56 shrink-0 transition-transform duration-300"
+                className="h-[180px] aspect-square shrink-0 transition-transform duration-300"
               >
                 <ClipboardCard
                   item={item}

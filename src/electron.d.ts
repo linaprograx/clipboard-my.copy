@@ -14,6 +14,9 @@ export interface IElectronAPI {
     onClipboardChanged: (callback: (item: ClipboardItem) => void) => () => void;
     pasteItem: (item: ClipboardItem) => void;
     pinItem: (id: string) => void;
+    deleteItem: (id: string) => void;
+    clearHistory: () => void;
+    updateItemContent: (id: string, content: string) => void;
 }
 
 declare global {

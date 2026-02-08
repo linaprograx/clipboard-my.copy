@@ -1,6 +1,6 @@
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { Lock, CornerDownLeft, Copy } from 'lucide-react';
+import { Lock, Copy, Edit2, Trash2 } from 'lucide-react';
 
 interface ClipboardItem {
     id: string;
@@ -63,70 +63,107 @@ export function ClipboardCard({ item, isActive, onClick }: ClipboardCardProps) {
         <div
             onClick={onClick}
             className={cn(
-                "relative flex flex-col w-full h-full rounded-[24px] overflow-hidden cursor-pointer transition-all duration-200",
-                "bg-[#2c2c2e]/90 shadow-2xl backdrop-blur-sm", // Slight transparency
+                "relative flex flex-col w-full aspect-square rounded-[24px] overflow-hidden cursor-pointer transition-all duration-200 group", // Added aspect-square
+                "bg-[#2c2c2e]/90 shadow-2xl backdrop-blur-sm",
                 isActive
-                    ? "ring-[4px] ring-white shadow-[0_0_30px_rgba(255,255,255,0.25)] z-20 scale-[1.02]" // Vibrant White Border + Glow
+                    ? "ring-[4px] ring-white shadow-[0_0_30px_rgba(255,255,255,0.25)] z-20 scale-[1.02]"
                     : "hover:brightness-110 hover:scale-[1.01] border border-white/5",
                 item.pinned && !isActive ? "ring-1 ring-amber-400/30" : ""
             )}
         >
-            {/* Header: Compact Vibrant Color Block (Approx 40% height) */}
-            <div className={cn("h-[45%] px-5 py-4 flex items-start justify-between relative overflow-hidden", theme.bg)}>
+            {/* Header: Compact Vibrant Color Block (Approx 35% height) */}
+            <div className={cn("h-[35%] px-4 py-3 flex items-start justify-between relative overflow-hidden", theme.bg)}>
 
                 {/* Subtle gradient overlay for depth */}
                 <div className="absolute inset-0 bg-gradient-to-br from-white/20 to-transparent pointer-events-none" />
 
-                <div className="flex flex-col overflow-hidden z-10">
-                    <span className="text-white font-black text-[15px] leading-none tracking-tight drop-shadow-sm">
-                        {theme.name}
-                    </span>
-                    <span className="text-white/80 text-[10px] font-medium mt-0.5 opacity-90 truncate">
+                <div className="flex flex-col overflow-hidden z-10 w-full">
+                    <div className="flex justify-between items-start w-full">
+                        <span className="text-white font-black text-[13px] leading-none tracking-tight drop-shadow-sm">
+                            {theme.name}
+                        </span>
+                        {/* Icon in Header - scaled down */}
+                        <div className="shrink-0 scale-75 origin-top-right opacity-90 -mt-1 -mr-1">
+                            {theme.icon}
+                        </div>
+                    </div>
+                    <span className="text-white/80 text-[9px] font-medium mt-auto opacity-90 truncate">
                         {getTimeAgo(item.timestamp)}
                     </span>
                 </div>
 
-                {/* Icon in Header - scaled down */}
-                <div className="shrink-0 scale-90 origin-top-right opacity-90">
-                    {theme.icon}
+                {/* Action Buttons (Visible on Hover/Active) */}
+                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            const newContent = prompt("Editar contenido:", item.content);
+                            if (newContent !== null) {
+                                window.electronAPI?.updateItemContent(item.id, newContent);
+                            }
+                        }}
+                        className="p-1.5 rounded-full bg-black/20 hover:bg-black/40 text-white backdrop-blur-md"
+                        title="Editar"
+                    >
+                        <Edit2 size={10} />
+                    </button>
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm("¿Borrar elemento?")) {
+                                window.electronAPI?.deleteItem(item.id);
+                            }
+                        }}
+                        className="p-1.5 rounded-full bg-red-500/80 hover:bg-red-600 text-white backdrop-blur-md"
+                        title="Borrar"
+                    >
+                        <Trash2 size={10} />
+                    </button>
                 </div>
             </div>
 
             {/* Body: Dark Content */}
             <div className="flex-1 p-3 flex flex-col relative bg-[#1e1e1e]">
                 {/* Content Text */}
-                <div className="flex-1 overflow-hidden mask-linear-fade">
+                <div className="flex-1 overflow-hidden mask-linear-fade relative">
                     {item.content.trim().length > 0 ? (
                         <p className={cn(
-                            "text-[11px] leading-[1.5]",
+                            "text-[10px] leading-[1.4] break-words whitespace-pre-wrap select-none", // Prevent text selection on card click
                             item.pinned ? "text-white font-medium" : "text-gray-400 font-mono"
                         )}>
-                            {item.content.substring(0, 150)}
+                            {item.content.substring(0, 100)}
                         </p>
                     ) : (
                         <div className="w-full h-full flex items-center justify-center opacity-20">
-                            <Copy size={24} className="text-white" />
+                            <Copy size={20} className="text-white" />
                         </div>
                     )}
                 </div>
 
                 {/* Footer Char Count */}
-                <div className="mt-2 flex justify-between items-center text-gray-500">
-                    <span className="text-[10px] font-bold tracking-wider">
+                <div className="mt-1 flex justify-between items-end text-gray-500">
+                    <span className="text-[9px] font-bold tracking-wider opacity-60">
                         {item.content.length} c
                     </span>
 
+                    {/* Copy Button (Bottom Right) */}
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            // Copy to clipboard using Web API
+                            navigator.clipboard.writeText(item.content);
+                            // Visual feedback could be added here
+                        }}
+                        className="p-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white hover:text-green-400 transition-colors z-20"
+                        title="Copiar"
+                    >
+                        <Copy size={12} />
+                    </button>
+
                     {/* Lock Overlay (Small) */}
                     {item.pinned && (
-                        <div className="flex items-center gap-1 text-amber-500/80">
-                            <Lock size={12} strokeWidth={2.5} />
-                        </div>
-                    )}
-
-                    {/* Enter Hint */}
-                    {isActive && (
-                        <div className="flex items-center gap-1 text-blue-500 animate-pulse">
-                            <CornerDownLeft size={10} strokeWidth={3} />
+                        <div className="absolute bottom-3 right-8 flex items-center gap-1 text-amber-500/80">
+                            <Lock size={10} strokeWidth={2.5} />
                         </div>
                     )}
                 </div>

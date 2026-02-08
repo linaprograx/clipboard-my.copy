@@ -1,17 +1,22 @@
-import { contextBridge, ipcRenderer } from 'electron';
-contextBridge.exposeInMainWorld('electronAPI', {
-    hideWithoutPaste: () => ipcRenderer.send('hide-window'),
-    getHistory: () => ipcRenderer.invoke('get-history'),
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const electron_1 = require("electron");
+electron_1.contextBridge.exposeInMainWorld('electronAPI', {
+    hideWithoutPaste: () => electron_1.ipcRenderer.send('hide-window'),
+    getHistory: () => electron_1.ipcRenderer.invoke('get-history'),
     onClipboardUpdate: (callback) => {
         const subscription = (_event, value) => callback(value);
-        ipcRenderer.on('clipboard-updated', subscription);
-        return () => ipcRenderer.removeListener('clipboard-updated', subscription);
+        electron_1.ipcRenderer.on('clipboard-updated', subscription);
+        return () => electron_1.ipcRenderer.removeListener('clipboard-updated', subscription);
     },
     onClipboardChanged: (callback) => {
         const subscription = (_event, value) => callback(value);
-        ipcRenderer.on('clipboard-changed', subscription);
-        return () => ipcRenderer.removeListener('clipboard-changed', subscription);
+        electron_1.ipcRenderer.on('clipboard-changed', subscription);
+        return () => electron_1.ipcRenderer.removeListener('clipboard-changed', subscription);
     },
-    pasteItem: (item) => ipcRenderer.send('paste-item', item),
-    pinItem: (id) => ipcRenderer.send('pin-item', id),
+    pasteItem: (item) => electron_1.ipcRenderer.send('paste-item', item),
+    pinItem: (id) => electron_1.ipcRenderer.send('pin-item', id),
+    deleteItem: (id) => electron_1.ipcRenderer.send('delete-item', id),
+    clearHistory: () => electron_1.ipcRenderer.send('clear-history'),
+    updateItemContent: (id, content) => electron_1.ipcRenderer.send('update-item-content', { id, content }),
 });

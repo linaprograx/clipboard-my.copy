@@ -2,7 +2,6 @@
   "name": "local-clipboard-manager",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
@@ -16,7 +15,7 @@
   "dependencies": {
     "clsx": "^2.1.1",
     "electron-squirrel-startup": "^1.0.1",
-    "electron-store": "^11.0.2",
+    "electron-store": "^8.1.0",
     "lucide-react": "^0.563.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
