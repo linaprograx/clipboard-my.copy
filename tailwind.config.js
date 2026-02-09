@@ -7,12 +7,12 @@ export default {
   theme: {
     extend: {},
   },
-  safelist: [
-    { pattern: /border-(amber|indigo|emerald|orange|slate|red)-(400|500|600)/ },
-    { pattern: /border-(amber|indigo|emerald|orange|slate|red)-(400|500|600)\/(10|20|30|40|50)/ },
-    { pattern: /bg-(amber|indigo|emerald|orange|slate|red)-(400|500|600)\/(10|20|30|40)/ },
-    { pattern: /text-(amber|indigo|emerald|orange|slate|red)-(400|500|600)/ },
-    { pattern: /from-(amber|indigo|emerald|orange|slate|red)-(500|600)\/(5|10|20|30)/ }
+    { pattern: /border-(amber|blue|indigo|emerald|orange|purple|slate|red)-(400|500|600)/ },
+{ pattern: /border-(amber|blue|indigo|emerald|orange|purple|slate|red)-(400|500|600)\/(10|20|30|40|50)/ },
+{ pattern: /bg-(amber|blue|indigo|emerald|orange|purple|slate|red)-(400|500|600)/ }, // Added solid support
+{ pattern: /bg-(amber|blue|indigo|emerald|orange|purple|slate|red)-(400|500|600)\/(10|20|30|40|90|100)/ },
+{ pattern: /text-(amber|blue|indigo|emerald|orange|purple|slate|red)-(400|500|600)/ },
+{ pattern: /from-(amber|blue|indigo|emerald|orange|purple|slate|red)-(500|600)\/(5|10|20|30)/ }
   ],
-  plugins: [],
+plugins: [],
 }

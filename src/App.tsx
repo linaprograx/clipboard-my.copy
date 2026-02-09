@@ -126,82 +126,89 @@ export function App() {
   ];
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-transparent font-sans overflow-hidden">
-      <div className="flex-1 flex flex-col h-full bg-[#1c1c1e]/95 backdrop-blur-2xl relative border-t border-white/10 shadow-[0_-1px_0_0_rgba(255,255,255,0.1)]">
+    <div className="h-screen w-screen flex flex-col bg-neutral-950 font-sans overflow-hidden text-neutral-200 selection:bg-white/20">
 
-        {/* Top Bar */}
-        <div className="h-[60px] w-full max-w-[95%] mx-auto px-4 flex items-center justify-between shrink-0 app-region-drag z-50">
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col h-full relative">
 
-          {/* Categories */}
-          <div className="flex-1 flex justify-start no-drag">
-            <div className="flex items-center gap-4 p-1.5 rounded-full bg-black/20 border border-white/5 backdrop-blur-md shadow-lg w-full max-w-2xl justify-between px-6">
-              {categories.map((cat, idx) => (
-                <button
-                  key={cat.id}
-                  onClick={() => setActiveCategory(cat.id)}
-                  title={`Alt+${idx + 1}`}
-                  className={cn(
-                    "flex flex-1 items-center justify-center gap-2 px-2 py-1.5 rounded-full transition-all duration-300 text-[11px] font-semibold tracking-wide select-none whitespace-nowrap",
-                    activeCategory === cat.id
-                      ? "bg-white text-black shadow-md scale-105"
-                      : "text-white/60 hover:text-white hover:bg-white/10"
-                  )}
-                >
-                  <cat.icon size={13} strokeWidth={2.5} />
-                  <span>{cat.label}</span>
-                </button>
-              ))}
-            </div>
+        {/* Top Bar: Full Width, Spaced, Connected */}
+        <div className="h-[60px] w-full px-6 grid grid-cols-[1fr_auto_1fr] items-center shrink-0 app-region-drag z-50 bg-[#1c1c1e]/90 backdrop-blur-xl border-b border-white/5 shadow-sm relative">
 
-            {/* Actions: Settings & Trash */}
-            <div className="flex items-center gap-2 ml-4">
+          {/* Left: Spacer to balance the grid for perfect centering */}
+          <div className="pointer-events-none" />
+
+          {/* Center: Categories */}
+          <div className="flex items-center justify-center no-drag h-full" style={{ gap: '2px' }}>
+            {categories.map((cat, idx) => (
               <button
-                onClick={() => setShowSettings(true)}
-                className="p-2.5 rounded-full bg-white/5 hover:bg-white/10 hover:text-white text-white/40 transition-all border border-transparent hover:border-white/20 backdrop-blur-md"
-                title="Configuración"
+                key={cat.id}
+                onClick={() => setActiveCategory(cat.id)}
+                title={`Alt+${idx + 1}`}
+                className={cn(
+                  "flex-none relative h-9 w-40 flex items-center justify-center gap-2 text-[13px] font-medium transition-all duration-200 outline-none rounded-full border shadow-sm",
+                  activeCategory === cat.id
+                    ? "bg-blue-600 text-white border-blue-500 shadow-blue-900/20"
+                    : "bg-white/5 text-neutral-400 hover:bg-white/10 hover:text-white border-white/5 hover:border-white/10"
+                )}
               >
-                <Settings size={16} />
+                <cat.icon size={15} className={activeCategory === cat.id ? "text-white" : "opacity-70"} />
+                <span>{cat.label}</span>
               </button>
-              <button
-                onClick={() => {
-                  if (confirm('¿Borrar todo el historial?')) window.electronAPI?.clearHistory();
-                }}
-                className="p-2.5 rounded-full bg-white/5 hover:bg-red-500/20 hover:text-red-400 text-white/40 transition-all border border-transparent hover:border-red-500/30 backdrop-blur-md"
-                title="Borrar todo"
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
+            ))}
           </div>
 
-          {/* Search */}
-          <div className="w-64 ml-8 group no-drag flex justify-end">
-            <div className="relative w-full">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-white/80 transition-colors" size={14} />
+          {/* Right: Search & Actions */}
+          <div className="flex items-center justify-end gap-4 no-drag">
+
+            {/* Search (Integrated & Expanded) */}
+            <div className="relative group w-64 xl:w-72 transition-all">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 group-focus-within:text-white transition-colors" size={14} />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Buscar (Cmd+F)..."
-                autoFocus
-                className="w-full bg-black/20 border border-white/5 focus:border-white/20 focus:bg-black/40 rounded-full pl-9 pr-4 py-1.5 text-xs text-white placeholder:text-white/30 outline-none transition-all shadow-inner"
+                placeholder="Search..."
+                className="w-full bg-black/20 border border-white/5 focus:border-white/10 focus:bg-black/40 rounded-full pl-9 pr-3 py-1.5 text-xs text-neutral-200 placeholder:text-neutral-600 outline-none transition-all"
               />
+            </div>
+
+            <div className="h-5 w-[1px] bg-white/10" />
+
+            {/* Actions */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  if (confirm('Clear entire history?')) window.electronAPI?.clearHistory();
+                }}
+                className="p-2 rounded-full hover:bg-white/5 text-neutral-500 hover:text-red-400 transition-colors"
+                title="Clear All"
+              >
+                <Trash2 size={16} />
+              </button>
+              <button
+                onClick={() => setShowSettings(true)}
+                className="p-2 rounded-full hover:bg-white/5 text-neutral-500 hover:text-white transition-colors"
+                title="Settings"
+              >
+                <Settings size={16} />
+              </button>
             </div>
           </div>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-x-auto overflow-y-hidden px-10 pt-2 pb-6 no-scrollbar flex items-center" style={{ gap: '25px' }}>
+        {/* Horizontal Scroll Content */}
+        <div className="flex-1 overflow-x-auto overflow-y-hidden px-8 pb-4 no-scrollbar flex items-center bg-neutral-900/30" style={{ gap: '10px' }}>
           {sortedHistory.length === 0 ? (
-            <div className="h-full w-full flex flex-col items-center justify-center text-gray-500 opacity-50">
-              <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center mb-2">
-                <Copy size={24} />
+            <div className="h-full w-full flex flex-col items-center justify-center text-neutral-600 opacity-60">
+              <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mb-4 ring-1 ring-white/5">
+                <Copy size={24} strokeWidth={1.5} />
               </div>
-              <p className="text-xs font-medium">{searchQuery ? 'No se encontraron resultados' : 'Portapapeles vacío'}</p>
+              <p className="text-sm font-medium">Clipboard is empty</p>
+              <p className="text-xs text-neutral-700 mt-1">Copy something to get started</p>
             </div>
           ) : (
             sortedHistory.map((item, index) => (
-              <div key={item.id} className="h-[180px] aspect-square shrink-0 transition-transform duration-300">
+              <div key={item.id} className="h-[200px] aspect-[4/5] shrink-0 transform transition-all duration-300">
                 <ClipboardCard
                   item={item}
                   isActive={index === selectedIndex}
@@ -213,7 +220,8 @@ export function App() {
           )}
         </div>
 
-        <div className="h-3 w-full app-region-drag shrink-0 bg-transparent absolute bottom-0 left-0" />
+        {/* Bottom App Region (Drag) */}
+        <div className="h-4 w-full app-region-drag shrink-0 bg-transparent absolute bottom-0 left-0 z-50" />
       </div>
 
       {/* Modals */}
